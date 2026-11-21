@@ -6,6 +6,19 @@ import { buildSignalForNow } from './globalTimeline.mjs';
 
 const cooldownMap = new Map(); // telegramId -> lastSignalTimestampMs
 
+function sanitizeAdminContact(raw) {
+  const cleaned = String(raw || '')
+    .replace(/\(?\s*(?:telegram\s*)?id\s*[:#-]?\s*\d+\s*\)?/gi, '')
+    .replace(/\b\d{6,20}\b/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+  // Ignore generic placeholder "@Admin"
+  if (!cleaned || /^@?admin$/i.test(cleaned)) {
+    return '';
+  }
+  return cleaned;
+}
+
 function getSignalBotConfig() {
   const token = (
     process.env.TELEGRAM_SIGNAL_BOT_TOKEN ||
@@ -18,18 +31,11 @@ function getSignalBotConfig() {
     process.env.ADMIN_BOT_TOKEN ||
     ''
   ).trim();
-  const adminId = String(
-    process.env.TELEGRAM_ADMIN_ID ||
-      process.env.TELEGRAM_ADMIN_CHAT_ID ||
-      process.env.ADMIN_CHAT_ID ||
-      process.env.ADMIN_ID ||
-      ''
-  ).trim();
 
   return {
     token,
     adminToken,
-    adminContact: process.env.TELEGRAM_ADMIN_CONTACT || `Admin (ID: ${adminId})`,
+    adminContact: sanitizeAdminContact(process.env.TELEGRAM_ADMIN_CONTACT),
     accessPriceAzn: Number(process.env.SIGNAL_ACCESS_PRICE_AZN || 55),
     testPriceAzn: Number(process.env.SIGNAL_TEST_PRICE_AZN || 2),
     cooldownSec: Number(process.env.SIGNAL_COOLDOWN_SECONDS || 12),
@@ -78,17 +84,25 @@ const SIGNAL_INLINE_KEYBOARD = {
 
 function buildAccessDeniedMessage(telegramId) {
   const { accessPriceAzn, testPriceAzn, adminContact } = getSignalBotConfig();
-  return [
+  const lines = [
     '<b>🔒 Siqnal Girişi Aktiv Deyil / Sınaq Cəhdləri Bitib</b>',
     '',
     `Lucky Jet Siqnal Botundan limitsiz istifadə etmək üçün <b>${accessPriceAzn} AZN</b> tam giriş aktivləşdirilməlidir.`,
     `<i>(Sınaq üçün 1 dəfəlik test: ${testPriceAzn} AZN)</i>`,
     '',
     `🆔 <b>Sizin Telegram ID:</b> <code>${escapeHtml(telegramId)}</code>`,
-    `📩 <b>Adminlə əlaqə:</b> ${escapeHtml(adminContact)}`,
+  ];
+
+  if (adminContact) {
+    lines.push(`📩 <b>Adminlə əlaqə:</b> ${escapeHtml(adminContact)}`);
+  }
+
+  lines.push(
     '',
-    'Ödənişdən sonra Telegram ID-nizi adminə göndərin — giriş aktiv edildiyi an <b>🚀 Siqnal Al</b> düyməsi işləyəcək.',
-  ].join('\n');
+    'Ödənişdən sonra öz Telegram ID-nizi adminə göndərin — giriş aktiv edildiyi an <b>🚀 Siqnal Al</b> düyməsi işləyəcək.'
+  );
+
+  return lines.join('\n');
 }
 
 function formatBakuTime(timestampMs) {
@@ -134,9 +148,11 @@ function buildSignalCardMessage(trialRemaining = null) {
     } else {
       lines.push(
         '⚠️ <b>Sınaq cəhdləriniz bitdi (qalan cəhd: 0).</b>',
-        `🔒 Davam etmək üçün <b>${accessPriceAzn} AZN</b> tam siqnal girişi lazımdır.`,
-        `📩 <b>Adminlə əlaqə:</b> ${escapeHtml(adminContact)}`
+        `🔒 Davam etmək üçün <b>${accessPriceAzn} AZN</b> tam siqnal girişi lazımdır.`
       );
+      if (adminContact) {
+        lines.push(`📩 <b>Adminlə əlaqə:</b> ${escapeHtml(adminContact)}`);
+      }
     }
   }
 
