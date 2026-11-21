@@ -26,13 +26,16 @@ function getSignalBotConfig() {
       ''
   ).trim();
 
+  const rawGameUrl = String(process.env.GAME_URL || '').trim().replace(/\/+$/, '');
+  const gameUrl = /^https:\/\/.+/i.test(rawGameUrl)
+    ? rawGameUrl
+    : 'https://jetrise-game-300.vercel.app';
+
   return {
     token,
     adminToken,
     adminContact: process.env.TELEGRAM_ADMIN_CONTACT || `Admin (ID: ${adminId})`,
-    gameUrl: String(process.env.GAME_URL || 'https://jetrise-game-300.vercel.app')
-      .trim()
-      .replace(/\/+$/, ''),
+    gameUrl,
     accessPriceAzn: Number(process.env.SIGNAL_ACCESS_PRICE_AZN || 55),
     testPriceAzn: Number(process.env.SIGNAL_TEST_PRICE_AZN || 2),
     cooldownSec: Number(process.env.SIGNAL_COOLDOWN_SECONDS || 12),
@@ -58,7 +61,16 @@ async function signalTgApi(method, payload = {}) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
-  return res.json();
+  const data = await res.json();
+  if (!data.ok && method !== 'getUpdates') {
+    console.error(
+      `[SignalBot] Telegram API xətası (${method}):`,
+      data.error_code || '',
+      data.description || JSON.stringify(data),
+      payload.reply_markup ? `| reply_markup: ${JSON.stringify(payload.reply_markup)}` : ''
+    );
+  }
+  return data;
 }
 
 const MAIN_REPLY_KEYBOARD = {
@@ -171,7 +183,7 @@ async function sendSignalResponse(chatId, telegramId) {
         chat_id: chatId,
         parse_mode: 'HTML',
         text: `⏳ Zəhmət olmasa növbəti siqnal üçün <b>${waitSec} saniyə</b> gözləyin.`,
-        reply_markup: SIGNAL_INLINE_KEYBOARD,
+        reply_markup: buildSignalMessageKeyboard(true),
       });
       return;
     }
@@ -200,7 +212,7 @@ async function sendSignalResponse(chatId, telegramId) {
         chat_id: chatId,
         parse_mode: 'HTML',
         text: `⏳ Növbəti sınaq siqnalı üçün <b>${waitSec} saniyə</b> gözləyin (qalan cəhd: <b>${access.trial_attempts}</b>).`,
-        reply_markup: SIGNAL_INLINE_KEYBOARD,
+        reply_markup: buildSignalMessageKeyboard(true),
       });
       return;
     }
@@ -291,7 +303,7 @@ export async function handleSignalBotUpdate(update) {
               ? 'İstədiyiniz vaxt <b>🚀 Siqnal Al</b> düyməsi ilə canlı raund siqnalı ala bilərsiniz.'
               : `Qalan <b>${access.trial_attempts}</b> sınaq cəhdinizdən istifadə etmək üçün <b>🚀 Siqnal Al</b> düyməsinə basın.`,
           ].join('\n'),
-          reply_markup: SIGNAL_INLINE_KEYBOARD,
+          reply_markup: buildSignalMessageKeyboard(true),
         });
       } else {
         await signalTgApi('sendMessage', {
@@ -326,11 +338,12 @@ const signalBotState = {
 };
 
 export function getSignalBotStatus() {
-  const { token, mode } = getSignalBotConfig();
+  const { token, mode, gameUrl } = getSignalBotConfig();
   return {
     configured: Boolean(token),
     hasToken: Boolean(token),
     mode,
+    gameUrl,
     pollingActive: signalPollingActive,
     connected: signalBotState.connected,
     username: signalBotState.username,
