@@ -26,16 +26,10 @@ function getSignalBotConfig() {
       ''
   ).trim();
 
-  const rawGameUrl = String(process.env.GAME_URL || '').trim().replace(/\/+$/, '');
-  const gameUrl = /^https:\/\/.+/i.test(rawGameUrl)
-    ? rawGameUrl
-    : 'https://jetrise-game-300.vercel.app';
-
   return {
     token,
     adminToken,
     adminContact: process.env.TELEGRAM_ADMIN_CONTACT || `Admin (ID: ${adminId})`,
-    gameUrl,
     accessPriceAzn: Number(process.env.SIGNAL_ACCESS_PRICE_AZN || 55),
     testPriceAzn: Number(process.env.SIGNAL_TEST_PRICE_AZN || 2),
     cooldownSec: Number(process.env.SIGNAL_COOLDOWN_SECONDS || 12),
@@ -81,15 +75,6 @@ const MAIN_REPLY_KEYBOARD = {
 const SIGNAL_INLINE_KEYBOARD = {
   inline_keyboard: [[{ text: '🚀 Siqnal Al', callback_data: 'signal:get' }]],
 };
-
-function buildSignalMessageKeyboard(includeNextSignal = true) {
-  const { gameUrl } = getSignalBotConfig();
-  const rows = [[{ text: 'Oyuna başla', web_app: { url: gameUrl } }]];
-  if (includeNextSignal) {
-    rows.push([{ text: '🚀 Siqnal Al', callback_data: 'signal:get' }]);
-  }
-  return { inline_keyboard: rows };
-}
 
 function buildAccessDeniedMessage(telegramId) {
   const { accessPriceAzn, testPriceAzn, adminContact } = getSignalBotConfig();
@@ -183,7 +168,7 @@ async function sendSignalResponse(chatId, telegramId) {
         chat_id: chatId,
         parse_mode: 'HTML',
         text: `⏳ Zəhmət olmasa növbəti siqnal üçün <b>${waitSec} saniyə</b> gözləyin.`,
-        reply_markup: buildSignalMessageKeyboard(true),
+        reply_markup: SIGNAL_INLINE_KEYBOARD,
       });
       return;
     }
@@ -194,7 +179,7 @@ async function sendSignalResponse(chatId, telegramId) {
       chat_id: chatId,
       parse_mode: 'HTML',
       text: buildSignalCardMessage(null),
-      reply_markup: buildSignalMessageKeyboard(true),
+      reply_markup: SIGNAL_INLINE_KEYBOARD,
     });
     return;
   }
@@ -212,7 +197,7 @@ async function sendSignalResponse(chatId, telegramId) {
         chat_id: chatId,
         parse_mode: 'HTML',
         text: `⏳ Növbəti sınaq siqnalı üçün <b>${waitSec} saniyə</b> gözləyin (qalan cəhd: <b>${access.trial_attempts}</b>).`,
-        reply_markup: buildSignalMessageKeyboard(true),
+        reply_markup: SIGNAL_INLINE_KEYBOARD,
       });
       return;
     }
@@ -223,7 +208,7 @@ async function sendSignalResponse(chatId, telegramId) {
         chat_id: chatId,
         parse_mode: 'HTML',
         text: buildAccessDeniedMessage(cleanId),
-        reply_markup: buildSignalMessageKeyboard(false),
+        reply_markup: MAIN_REPLY_KEYBOARD,
       });
       return;
     }
@@ -234,17 +219,17 @@ async function sendSignalResponse(chatId, telegramId) {
       chat_id: chatId,
       parse_mode: 'HTML',
       text: buildSignalCardMessage(consumed.remaining),
-      reply_markup: buildSignalMessageKeyboard(consumed.remaining > 0),
+      reply_markup: consumed.remaining > 0 ? SIGNAL_INLINE_KEYBOARD : MAIN_REPLY_KEYBOARD,
     });
     return;
   }
 
-  // 3. Aktiv haqqı qalmayıb -> 55 AZN giriş məlumatı + Oyuna başla düyməsi
+  // 3. Aktiv haqqı qalmayıb -> 55 AZN giriş məlumatı
   await signalTgApi('sendMessage', {
     chat_id: chatId,
     parse_mode: 'HTML',
     text: buildAccessDeniedMessage(cleanId),
-    reply_markup: buildSignalMessageKeyboard(false),
+    reply_markup: MAIN_REPLY_KEYBOARD,
   });
 }
 
@@ -285,7 +270,7 @@ export async function handleSignalBotUpdate(update) {
           '',
           'Canlı raund siqnalı almaq üçün aşağıdakı <b>🚀 Siqnal Al</b> düyməsinə basın.',
         ].join('\n'),
-        reply_markup: buildSignalMessageKeyboard(true),
+        reply_markup: MAIN_REPLY_KEYBOARD,
       });
       return;
     }
@@ -303,14 +288,14 @@ export async function handleSignalBotUpdate(update) {
               ? 'İstədiyiniz vaxt <b>🚀 Siqnal Al</b> düyməsi ilə canlı raund siqnalı ala bilərsiniz.'
               : `Qalan <b>${access.trial_attempts}</b> sınaq cəhdinizdən istifadə etmək üçün <b>🚀 Siqnal Al</b> düyməsinə basın.`,
           ].join('\n'),
-          reply_markup: buildSignalMessageKeyboard(true),
+          reply_markup: SIGNAL_INLINE_KEYBOARD,
         });
       } else {
         await signalTgApi('sendMessage', {
           chat_id: chatId,
           parse_mode: 'HTML',
           text: buildAccessDeniedMessage(fromId),
-          reply_markup: buildSignalMessageKeyboard(false),
+          reply_markup: MAIN_REPLY_KEYBOARD,
         });
       }
       return;
@@ -324,7 +309,7 @@ export async function handleSignalBotUpdate(update) {
     await signalTgApi('sendMessage', {
       chat_id: chatId,
       text: 'Siqnal almaq üçün "🚀 Siqnal Al" düyməsini sıxın.',
-      reply_markup: buildSignalMessageKeyboard(true),
+      reply_markup: MAIN_REPLY_KEYBOARD,
     });
   }
 }
@@ -338,12 +323,11 @@ const signalBotState = {
 };
 
 export function getSignalBotStatus() {
-  const { token, mode, gameUrl } = getSignalBotConfig();
+  const { token, mode } = getSignalBotConfig();
   return {
     configured: Boolean(token),
     hasToken: Boolean(token),
     mode,
-    gameUrl,
     pollingActive: signalPollingActive,
     connected: signalBotState.connected,
     username: signalBotState.username,
