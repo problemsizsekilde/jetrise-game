@@ -117,11 +117,27 @@ const server = http.createServer(async (req, res) => {
   }
 
   const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
-  const pathname = url.pathname;
+  let pathname = url.pathname
+    .replace(/\/{2,}/g, '/')
+    .replace(/^\/api\/api(\/|$)/i, '/api$1');
+  if (pathname.length > 1 && pathname.endsWith('/')) {
+    pathname = pathname.slice(0, -1);
+  }
 
   try {
+    // Root status endpoint (so opening Render URL directly shows healthy status)
+    if (req.method === 'GET' && (pathname === '/' || pathname === '/api')) {
+      return reply(200, {
+        ok: true,
+        service: 'Lucky Jet API',
+        status: 'running',
+        serverTimeMs: Date.now(),
+        health: '/api/health',
+      });
+    }
+
     // Health & shared clock sync
-    if (req.method === 'GET' && pathname === '/api/health') {
+    if (req.method === 'GET' && (pathname === '/api/health' || pathname === '/health')) {
       return reply(200, {
         ok: true,
         serverTimeMs: Date.now(),
@@ -133,11 +149,11 @@ const server = http.createServer(async (req, res) => {
       });
     }
 
-    if (req.method === 'GET' && pathname === '/api/time') {
+    if (req.method === 'GET' && (pathname === '/api/time' || pathname === '/time')) {
       return reply(200, { serverTimeMs: Date.now() });
     }
 
-    if (req.method === 'GET' && pathname === '/api/round') {
+    if (req.method === 'GET' && (pathname === '/api/round' || pathname === '/round')) {
       const state = getCurrentAndNextRound(Date.now());
       return reply(200, {
         serverTimeMs: Date.now(),
@@ -148,8 +164,13 @@ const server = http.createServer(async (req, res) => {
       });
     }
 
-    // --- Auth Endpoints (Gmail + Nick + Password) ---
-    if (req.method === 'POST' && pathname === '/api/auth/register') {
+    // --- Auth Endpoints (Gmail + Nick + Password) with clean aliases ---
+    if (
+      req.method === 'POST' &&
+      (pathname === '/api/auth/register' ||
+        pathname === '/api/register' ||
+        pathname === '/auth/register')
+    ) {
       const body = await readJsonBody(req);
       const result = registerUser({
         gmail: body.gmail,
@@ -159,7 +180,10 @@ const server = http.createServer(async (req, res) => {
       return reply(result.ok ? 201 : 400, result);
     }
 
-    if (req.method === 'POST' && pathname === '/api/auth/login') {
+    if (
+      req.method === 'POST' &&
+      (pathname === '/api/auth/login' || pathname === '/api/login' || pathname === '/auth/login')
+    ) {
       const body = await readJsonBody(req);
       const result = loginUser({
         identifier: body.identifier,
@@ -168,7 +192,10 @@ const server = http.createServer(async (req, res) => {
       return reply(result.ok ? 200 : 401, result);
     }
 
-    if (req.method === 'GET' && pathname === '/api/auth/me') {
+    if (
+      req.method === 'GET' &&
+      (pathname === '/api/auth/me' || pathname === '/api/me' || pathname === '/auth/me')
+    ) {
       const token = getBearerToken(req);
       const user = getUserBySessionToken(token);
       if (!user) {
@@ -177,7 +204,10 @@ const server = http.createServer(async (req, res) => {
       return reply(200, { ok: true, user });
     }
 
-    if (req.method === 'POST' && pathname === '/api/auth/logout') {
+    if (
+      req.method === 'POST' &&
+      (pathname === '/api/auth/logout' || pathname === '/api/logout' || pathname === '/auth/logout')
+    ) {
       const token = getBearerToken(req);
       logoutSession(token);
       return reply(200, { ok: true });

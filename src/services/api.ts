@@ -26,14 +26,16 @@ export interface AuthResponse {
 /**
  * Backend API base URL.
  * - Production (Vercel): set `VITE_API_URL` in Vercel Environment Variables (e.g. https://your-api.onrender.com)
+ * - Strips trailing slashes and any trailing `/api` so `/api/api/...` or `//` never occurs.
  * - Local dev: leave empty to use Vite `/api` proxy -> http://127.0.0.1:3001
  */
 export const API_BASE_URL = String(import.meta.env.VITE_API_URL || '')
   .trim()
-  .replace(/\/+$/, '');
+  .replace(/\/+$/, '')
+  .replace(/\/api$/i, '');
 
 function buildApiUrl(path: string): string {
-  const cleanPath = path.startsWith('/') ? path : `/${path}`;
+  const cleanPath = `/${path.replace(/^\/+/, '')}`.replace(/\/{2,}/g, '/');
   return API_BASE_URL ? `${API_BASE_URL}${cleanPath}` : cleanPath;
 }
 
