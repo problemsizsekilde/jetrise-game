@@ -1,5 +1,5 @@
 import {
-  consumeSingleSignalCredit,
+  consumeTrialAttempt,
   getSignalUserAccess,
 } from './db.mjs';
 import { buildSignalForNow } from './globalTimeline.mjs';
@@ -52,10 +52,10 @@ const SIGNAL_INLINE_KEYBOARD = {
 function buildAccessDeniedMessage(telegramId) {
   const { accessPriceAzn, testPriceAzn, adminContact } = getSignalBotConfig();
   return [
-    '<b>🔒 Siqnal Girişi Aktiv Deyil</b>',
+    '<b>🔒 Siqnal Girişi Aktiv Deyil / Sınaq Cəhdləri Bitib</b>',
     '',
-    `Lucky Jet Siqnal Botundan limitsiz istifadə üçün <b>${accessPriceAzn} AZN</b> tam giriş aktivləşdirilməlidir.`,
-    `<i>(Sınaq üçün 1 dəfəlik test siqnalı: ${testPriceAzn} AZN)</i>`,
+    `Lucky Jet Siqnal Botundan limitsiz istifadə etmək üçün <b>${accessPriceAzn} AZN</b> tam giriş aktivləşdirilməlidir.`,
+    `<i>(Sınaq üçün 1 dəfəlik test: ${testPriceAzn} AZN)</i>`,
     '',
     `🆔 <b>Sizin Telegram ID:</b> <code>${escapeHtml(telegramId)}</code>`,
     `📩 <b>Adminlə əlaqə:</b> ${escapeHtml(adminContact)}`,
@@ -64,7 +64,7 @@ function buildAccessDeniedMessage(telegramId) {
   ].join('\n');
 }
 
-function buildSignalCardMessage(isSingleTest = false) {
+function buildSignalCardMessage(trialRemaining = null) {
   const { accessPriceAzn, adminContact } = getSignalBotConfig();
   const sig = buildSignalForNow(Date.now());
   const takeoffTimeStr = new Date(sig.takeoffAt).toLocaleTimeString('az-AZ', {
@@ -73,6 +73,7 @@ function buildSignalCardMessage(isSingleTest = false) {
     second: '2-digit',
   });
 
+  const isTrial = trialRemaining !== null;
   const roundLabel = sig.isCurrentRound ? 'Cari raund' : 'Növbəti raund';
   const targetLine =
     sig.recommendedMultiplier !== null
@@ -80,8 +81,8 @@ function buildSignalCardMessage(isSingleTest = false) {
       : '🎯 <b>Tövsiyə:</b> <b>Bu raundu buraxın (Mərc etməyin)</b>';
 
   const lines = [
-    isSingleTest
-      ? '<b>🎟️ LUCKY JET — 1 DƏFƏLİK TEST SİQNALI</b>'
+    isTrial
+      ? '<b>🎟️ LUCKY JET — SINAQ SİQNALI</b>'
       : '<b>🚀 LUCKY JET CANLI SİQNAL</b>',
     '',
     `🔢 <b>Raund:</b> #${sig.targetRoundNumber} (${roundLabel})`,
@@ -91,14 +92,17 @@ function buildSignalCardMessage(isSingleTest = false) {
     `💡 <b>Qeyd:</b> ${sig.riskNote}`,
   ];
 
-  if (isSingleTest) {
-    lines.push(
-      '',
-      '────────────────────',
-      '⚠️ <b>1 dəfəlik test haqqınız istifadə olundu (qalan kredit: 0).</b>',
-      `🔒 Davam etmək üçün <b>${accessPriceAzn} AZN</b> tam siqnal girişi lazımdır.`,
-      `📩 <b>Adminlə əlaqə:</b> ${escapeHtml(adminContact)}`
-    );
+  if (isTrial) {
+    lines.push('', '────────────────────');
+    if (trialRemaining > 0) {
+      lines.push(`🎟️ <b>Qalan sınaq cəhdi:</b> <b>${trialRemaining}</b>`);
+    } else {
+      lines.push(
+        '⚠️ <b>Sınaq cəhdləriniz bitdi (qalan cəhd: 0).</b>',
+        `🔒 Davam etmək üçün <b>${accessPriceAzn} AZN</b> tam siqnal girişi lazımdır.`,
+        `📩 <b>Adminlə əlaqə:</b> ${escapeHtml(adminContact)}`
+      );
+    }
   }
 
   return lines.join('\n');
@@ -106,8 +110,8 @@ function buildSignalCardMessage(isSingleTest = false) {
 
 function formatStatusLabel(access) {
   if (access.unlimited) return '✅ Tam giriş (Limitsiz)';
-  if (access.single_signal_credits > 0) {
-    return `🎟️ 1 dəfəlik test aktivdir (${access.single_signal_credits} kredit)`;
+  if (access.trial_attempts > 0) {
+    return `🎟️ Sınaq cəhdləri aktivdir (qalan: ${access.trial_attempts})`;
   }
   return '🔒 Aktiv deyil';
 }
@@ -139,16 +143,31 @@ async function sendSignalResponse(chatId, telegramId) {
     await signalTgApi('sendMessage', {
       chat_id: chatId,
       parse_mode: 'HTML',
-      text: buildSignalCardMessage(false),
+      text: buildSignalCardMessage(null),
       reply_markup: SIGNAL_INLINE_KEYBOARD,
     });
     return;
   }
 
-  // 2. 1 dəfəlik test krediti (single_signal_credits > 0)
-  if (access.single_signal_credits > 0) {
-    // Dərhal qalıcı bazada 0-a endir ki, bot restart olunsa belə təkrar istifadə edilməsin
-    const consumed = consumeSingleSignalCredit(cleanId);
+  // 2. Sınaq cəhdləri (trial_attempts > 0)
+  if (access.trial_attempts > 0) {
+    const { cooldownSec } = getSignalBotConfig();
+    const now = Date.now();
+    const lastAt = cooldownMap.get(cleanId) || 0;
+    const remainingMs = cooldownSec * 1000 - (now - lastAt);
+
+    if (remainingMs > 0) {
+      const waitSec = Math.ceil(remainingMs / 1000);
+      await signalTgApi('sendMessage', {
+        chat_id: chatId,
+        parse_mode: 'HTML',
+        text: `⏳ Növbəti sınaq siqnalı üçün <b>${waitSec} saniyə</b> gözləyin (qalan cəhd: <b>${access.trial_attempts}</b>).`,
+        reply_markup: SIGNAL_INLINE_KEYBOARD,
+      });
+      return;
+    }
+
+    const consumed = consumeTrialAttempt(cleanId);
     if (!consumed.ok) {
       await signalTgApi('sendMessage', {
         chat_id: chatId,
@@ -159,16 +178,18 @@ async function sendSignalResponse(chatId, telegramId) {
       return;
     }
 
+    cooldownMap.set(cleanId, now);
+
     await signalTgApi('sendMessage', {
       chat_id: chatId,
       parse_mode: 'HTML',
-      text: buildSignalCardMessage(true),
-      reply_markup: MAIN_REPLY_KEYBOARD,
+      text: buildSignalCardMessage(consumed.remaining),
+      reply_markup: consumed.remaining > 0 ? SIGNAL_INLINE_KEYBOARD : MAIN_REPLY_KEYBOARD,
     });
     return;
   }
 
-  // 3. Heç bir aktiv haqqı yoxdur -> 55 AZN giriş məlumatı
+  // 3. Aktiv haqqı qalmayıb -> 55 AZN giriş məlumatı
   await signalTgApi('sendMessage', {
     chat_id: chatId,
     parse_mode: 'HTML',
@@ -178,7 +199,6 @@ async function sendSignalResponse(chatId, telegramId) {
 }
 
 export async function handleSignalBotUpdate(update) {
-  // 1. Inline button callbacks
   if (update.callback_query) {
     const cq = update.callback_query;
     const fromId = String(cq.from?.id || '');
@@ -195,7 +215,6 @@ export async function handleSignalBotUpdate(update) {
     return;
   }
 
-  // 2. Text messages & Reply Keyboard buttons
   if (update.message && update.message.text) {
     const msg = update.message;
     const fromId = String(msg.from?.id || '');
@@ -223,7 +242,7 @@ export async function handleSignalBotUpdate(update) {
 
     if (lower === 'ℹ️ statusum' || lower === 'statusum' || lower === '/status') {
       const access = getSignalUserAccess(fromId);
-      if (access.unlimited || access.single_signal_credits > 0) {
+      if (access.unlimited || access.trial_attempts > 0) {
         await signalTgApi('sendMessage', {
           chat_id: chatId,
           parse_mode: 'HTML',
@@ -232,7 +251,7 @@ export async function handleSignalBotUpdate(update) {
             `🆔 Telegram ID: <code>${escapeHtml(fromId)}</code>`,
             access.unlimited
               ? 'İstədiyiniz vaxt <b>🚀 Siqnal Al</b> düyməsi ilə canlı raund siqnalı ala bilərsiniz.'
-              : '<b>1 dəfəlik test</b> siqnalınızı almaq üçün <b>🚀 Siqnal Al</b> düyməsinə basın.',
+              : `Qalan <b>${access.trial_attempts}</b> sınaq cəhdinizdən istifadə etmək üçün <b>🚀 Siqnal Al</b> düyməsinə basın.`,
           ].join('\n'),
           reply_markup: SIGNAL_INLINE_KEYBOARD,
         });

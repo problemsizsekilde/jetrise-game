@@ -3,7 +3,7 @@ import {
   getAdminStats,
   getPendingRequests,
   grantSignalAccess,
-  grantSingleSignalTest,
+  grantTrialAttempts,
   LIMITS,
   listSignalUsers,
   resolveWalletRequest,
@@ -255,6 +255,7 @@ export async function handleTelegramUpdate(update) {
     const parts = rawText.split(/\s+/);
     const cmd = parts[0].toLowerCase().split('@')[0];
     const arg = parts[1] || '';
+    const arg2 = parts[2] || '';
 
     if (cmd === '/start' || cmd === '/help') {
       await adminTgApi('sendMessage', {
@@ -268,9 +269,9 @@ export async function handleTelegramUpdate(update) {
           '/stats — Ümumi statistika',
           '',
           '<b>Siqnal Botu icazə idarəetməsi:</b>',
-          '<code>/test &lt;telegram_id&gt;</code> (və ya <code>/1defelik &lt;telegram_id&gt;</code>) — 1 dəfəlik test siqnalı (1 kredit) ver',
+          '<code>/test &lt;telegram_id&gt; [say]</code> — Sınaq siqnal cəhdi ver (məs: <code>/test 123456789 10</code>, say yazılmazsa 1)',
           '<code>/ver &lt;telegram_id&gt;</code> — Tam / limitsiz siqnal girişi ver',
-          '<code>/al &lt;telegram_id&gt;</code> — Həm test kreditini, həm tam girişi ləğv et',
+          '<code>/al &lt;telegram_id&gt;</code> — Həm sınaq cəhdlərini, həm tam girişi ləğv et',
           '/istifadeciler — Aktiv icazəli istifadəçilərin siyahısı',
         ].join('\n'),
       });
@@ -282,11 +283,12 @@ export async function handleTelegramUpdate(update) {
         await adminTgApi('sendMessage', {
           chat_id: msg.chat.id,
           parse_mode: 'HTML',
-          text: '⚠️ İstifadə qaydası: <code>/test 123456789</code> və ya <code>/1defelik 123456789</code>',
+          text: '⚠️ İstifadə qaydası: <code>/test 123456789 10</code> (say yazılmazsa default 1 cəhd verilir)',
         });
         return;
       }
-      const res = grantSingleSignalTest(arg, `admin:${fromId}`);
+      const count = arg2 ? Number(arg2) : 1;
+      const res = grantTrialAttempts(arg, count, `admin:${fromId}`);
       if (!res.ok) {
         await adminTgApi('sendMessage', {
           chat_id: msg.chat.id,
@@ -297,7 +299,7 @@ export async function handleTelegramUpdate(update) {
       await adminTgApi('sendMessage', {
         chat_id: msg.chat.id,
         parse_mode: 'HTML',
-        text: `🎟️ <code>${escapeHtml(arg)}</code> ID-li istifadəçiyə <b>1 dəfəlik test siqnalı</b> (<code>single_signal_credits = 1</code>) verildi!`,
+        text: `🎟️ <code>${escapeHtml(arg)}</code> ID-li istifadəçiyə <b>${res.entry.trial_attempts} ədəd sınaq siqnal cəhdi</b> (<code>trial_attempts = ${res.entry.trial_attempts}</code>) verildi!`,
       });
       return;
     }
@@ -366,7 +368,7 @@ export async function handleTelegramUpdate(update) {
       const rows = users.map((u, idx) => {
         const badge = u.unlimited
           ? '♾️ Tam giriş'
-          : `🎟️ 1 dəfəlik test (${u.single_signal_credits} kredit)`;
+          : `🎟️ Sınaq: ${u.trial_attempts} cəhd`;
         return `${idx + 1}. <code>${escapeHtml(u.telegramId)}</code> — ${badge} (${new Date(
           u.grantedAt
         ).toLocaleDateString('az-AZ')})`;

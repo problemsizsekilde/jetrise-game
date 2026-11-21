@@ -576,15 +576,17 @@ export function getAdminStats() {
 
 function normalizeSignalEntry(raw, telegramId) {
   if (!raw || typeof raw !== 'object') return null;
+  const rawTrials =
+    raw.trial_attempts !== undefined ? raw.trial_attempts : raw.single_signal_credits;
   const unlimited =
-    typeof raw.unlimited === 'boolean' ? raw.unlimited : raw.single_signal_credits === undefined;
-  const credits = Number.isFinite(Number(raw.single_signal_credits))
-    ? Math.max(0, Math.floor(Number(raw.single_signal_credits)))
+    typeof raw.unlimited === 'boolean' ? raw.unlimited : rawTrials === undefined;
+  const trialAttempts = Number.isFinite(Number(rawTrials))
+    ? Math.max(0, Math.floor(Number(rawTrials)))
     : 0;
   return {
     telegramId: String(raw.telegramId || telegramId),
     unlimited,
-    single_signal_credits: credits,
+    trial_attempts: trialAttempts,
     grantedAt: raw.grantedAt || Date.now(),
     grantedBy: String(raw.grantedBy || 'admin'),
   };
@@ -595,7 +597,7 @@ export function getSignalUserAccess(telegramId) {
   const cleanId = String(telegramId || '').trim();
   const entry = normalizeSignalEntry(db.signalUsers?.[cleanId], cleanId);
   if (!entry) {
-    return { telegramId: cleanId, unlimited: false, single_signal_credits: 0 };
+    return { telegramId: cleanId, unlimited: false, trial_attempts: 0 };
   }
   return entry;
 }
@@ -611,7 +613,7 @@ export function grantSignalAccess(telegramId, grantedBy = 'admin') {
   db.signalUsers[cleanId] = {
     telegramId: cleanId,
     unlimited: true,
-    single_signal_credits: existing?.single_signal_credits || 0,
+    trial_attempts: existing?.trial_attempts || 0,
     grantedAt: Date.now(),
     grantedBy: String(grantedBy),
   };
@@ -619,17 +621,21 @@ export function grantSignalAccess(telegramId, grantedBy = 'admin') {
   return { ok: true, alreadyExists: alreadyUnlimited, entry: db.signalUsers[cleanId] };
 }
 
-export function grantSingleSignalTest(telegramId, grantedBy = 'admin') {
+export function grantTrialAttempts(telegramId, count = 1, grantedBy = 'admin') {
   const db = loadDb();
   const cleanId = String(telegramId || '').trim();
   if (!/^\d{4,20}$/.test(cleanId)) {
     return { ok: false, error: 'Düzgün Telegram ID daxil edin (yalnız rəqəmlər).' };
   }
+  const parsedCount = Math.floor(Number(count));
+  if (!Number.isFinite(parsedCount) || parsedCount < 1 || parsedCount > 1000) {
+    return { ok: false, error: 'Sınaq cəhd sayı 1 ilə 1000 arasında tam ədəd olmalıdır.' };
+  }
   const existing = normalizeSignalEntry(db.signalUsers?.[cleanId], cleanId);
   db.signalUsers[cleanId] = {
     telegramId: cleanId,
     unlimited: Boolean(existing?.unlimited),
-    single_signal_credits: 1,
+    trial_attempts: parsedCount,
     grantedAt: Date.now(),
     grantedBy: String(grantedBy),
   };
@@ -637,21 +643,21 @@ export function grantSingleSignalTest(telegramId, grantedBy = 'admin') {
   return { ok: true, entry: db.signalUsers[cleanId] };
 }
 
-export function consumeSingleSignalCredit(telegramId) {
+export function consumeTrialAttempt(telegramId) {
   const db = loadDb();
   const cleanId = String(telegramId || '').trim();
   const existing = normalizeSignalEntry(db.signalUsers?.[cleanId], cleanId);
-  if (!existing || existing.single_signal_credits <= 0) {
+  if (!existing || existing.trial_attempts <= 0) {
     return { ok: false, remaining: 0 };
   }
-  const nextCredits = Math.max(0, existing.single_signal_credits - 1);
+  const remaining = Math.max(0, existing.trial_attempts - 1);
   db.signalUsers[cleanId] = {
     ...existing,
-    single_signal_credits: nextCredits,
+    trial_attempts: remaining,
     lastUsedAt: Date.now(),
   };
   saveDb();
-  return { ok: true, remaining: nextCredits };
+  return { ok: true, remaining };
 }
 
 export function revokeSignalAccess(telegramId) {
@@ -670,13 +676,13 @@ export function revokeSignalAccess(telegramId) {
 
 export function isSignalUserAuthorized(telegramId) {
   const access = getSignalUserAccess(telegramId);
-  return access.unlimited || access.single_signal_credits > 0;
+  return access.unlimited || access.trial_attempts > 0;
 }
 
 export function listSignalUsers() {
   const db = loadDb();
   return Object.entries(db.signalUsers || {})
     .map(([id, raw]) => normalizeSignalEntry(raw, id))
-    .filter((u) => u && (u.unlimited || u.single_signal_credits > 0))
+    .filter((u) => u && (u.unlimited || u.trial_attempts > 0))
     .sort((a, b) => b.grantedAt - a.grantedAt);
 }
