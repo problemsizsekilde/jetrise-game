@@ -26,13 +26,54 @@ loadEnvFile();
 
 const PORT = Number(process.env.PORT || 3001);
 
-function sendJson(res, status, data) {
-  res.writeHead(status, {
-    'Content-Type': 'application/json; charset=utf-8',
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+function resolveCorsOrigin(req) {
+  const origin = String(req.headers.origin || '').trim();
+  if (!origin) return '*';
+
+  // Allow localhost, LAN IPs, any *.vercel.app deployment, and custom ALLOWED_ORIGINS
+  const extraAllowed = String(process.env.ALLOWED_ORIGINS || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  const isVercel = /^https:\/\/[a-z0-9-]+\.vercel\.app$/i.test(origin);
+  const isLocal =
+    /^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+)(:\d+)?$/i.test(origin);
+
+  if (isVercel || isLocal || extraAllowed.includes('*') || extraAllowed.includes(origin)) {
+    return origin;
+  }
+
+  // Default permissive fallback unless STRICT_CORS=true
+  if (process.env.STRICT_CORS === 'true') {
+    console.warn(`[CORS] Blocked origin: ${origin}`);
+    return '';
+  }
+  return origin;
+}
+
+function buildCorsHeaders(req) {
+  const allowOrigin = resolveCorsOrigin(req);
+  const headers = {
+    'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
     'Access-Control-Allow-Headers':
       'Content-Type, Authorization, x-admin-id, x-telegram-bot-api-secret-token',
+    'Access-Control-Max-Age': '86400',
+    Vary: 'Origin',
+  };
+  if (allowOrigin) {
+    headers['Access-Control-Allow-Origin'] = allowOrigin;
+    if (allowOrigin !== '*') {
+      headers['Access-Control-Allow-Credentials'] = 'true';
+    }
+  }
+  return headers;
+}
+
+function sendJson(req, res, status, data) {
+  res.writeHead(status, {
+    'Content-Type': 'application/json; charset=utf-8',
+    ...buildCorsHeaders(req),
   });
   res.end(JSON.stringify(data));
 }
@@ -67,8 +108,11 @@ function getBearerToken(req) {
 }
 
 const server = http.createServer(async (req, res) => {
+  const reply = (status, data) => sendJson(req, res, status, data);
+
   if (req.method === 'OPTIONS') {
-    sendJson(res, 204, {});
+    res.writeHead(204, buildCorsHeaders(req));
+    res.end();
     return;
   }
 
@@ -78,7 +122,7 @@ const server = http.createServer(async (req, res) => {
   try {
     // Health & shared clock sync
     if (req.method === 'GET' && pathname === '/api/health') {
-      return sendJson(res, 200, {
+      return reply(200, {
         ok: true,
         serverTimeMs: Date.now(),
         adminBotConfigured: Boolean(
@@ -90,12 +134,12 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'GET' && pathname === '/api/time') {
-      return sendJson(res, 200, { serverTimeMs: Date.now() });
+      return reply(200, { serverTimeMs: Date.now() });
     }
 
     if (req.method === 'GET' && pathname === '/api/round') {
       const state = getCurrentAndNextRound(Date.now());
-      return sendJson(res, 200, {
+      return reply(200, {
         serverTimeMs: Date.now(),
         roundNumber: state.current.roundNumber,
         phase: state.phase,
@@ -112,7 +156,7 @@ const server = http.createServer(async (req, res) => {
         nick: body.nick,
         password: body.password,
       });
-      return sendJson(res, result.ok ? 201 : 400, result);
+      return reply(result.ok ? 201 : 400, result);
     }
 
     if (req.method === 'POST' && pathname === '/api/auth/login') {
@@ -121,22 +165,22 @@ const server = http.createServer(async (req, res) => {
         identifier: body.identifier,
         password: body.password,
       });
-      return sendJson(res, result.ok ? 200 : 401, result);
+      return reply(result.ok ? 200 : 401, result);
     }
 
     if (req.method === 'GET' && pathname === '/api/auth/me') {
       const token = getBearerToken(req);
       const user = getUserBySessionToken(token);
       if (!user) {
-        return sendJson(res, 401, { ok: false, error: 'Sessiya aktiv deyil.' });
+        return reply(401, { ok: false, error: 'Sessiya aktiv deyil.' });
       }
-      return sendJson(res, 200, { ok: true, user });
+      return reply(200, { ok: true, user });
     }
 
     if (req.method === 'POST' && pathname === '/api/auth/logout') {
       const token = getBearerToken(req);
       logoutSession(token);
-      return sendJson(res, 200, { ok: true });
+      return reply(200, { ok: true });
     }
 
     // User state (balance, pending/approved/rejected requests, transactions)
@@ -144,7 +188,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && userStateMatch) {
       const userId = decodeURIComponent(userStateMatch[1]);
       const username = url.searchParams.get('username') || undefined;
-      return sendJson(res, 200, getUserState(userId, username));
+      return reply(200, getUserState(userId, username));
     }
 
     // Update username
@@ -153,7 +197,7 @@ const server = http.createServer(async (req, res) => {
       const userId = decodeURIComponent(userProfileMatch[1]);
       const body = await readJsonBody(req);
       const result = updateUserProfile(userId, body.username);
-      return sendJson(res, result.ok ? 200 : 400, result);
+      return reply(result.ok ? 200 : 400, result);
     }
 
     // Create Deposit / Withdraw request -> Persist as PENDING -> Notify Telegram Admin Bot
@@ -171,11 +215,11 @@ const server = http.createServer(async (req, res) => {
       });
 
       if (!result.ok) {
-        return sendJson(res, 400, result);
+        return reply(400, result);
       }
 
       const tgResult = await notifyAdminNewRequest(result.request, result.user);
-      return sendJson(res, 201, {
+      return reply(201, {
         ok: true,
         request: result.request,
         user: result.user,
@@ -187,19 +231,19 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && pathname === '/api/wallet/bet') {
       const body = await readJsonBody(req);
       const result = applyGameBet(body.userId, body.amount, body.roundNumber);
-      return sendJson(res, result.ok ? 200 : 400, result);
+      return reply(result.ok ? 200 : 400, result);
     }
 
     if (req.method === 'POST' && pathname === '/api/wallet/cancel') {
       const body = await readJsonBody(req);
       const result = applyGameCancel(body.userId, body.amount);
-      return sendJson(res, result.ok ? 200 : 400, result);
+      return reply(result.ok ? 200 : 400, result);
     }
 
     if (req.method === 'POST' && pathname === '/api/wallet/win') {
       const body = await readJsonBody(req);
       const result = applyGameWin(body.userId, body.amount, body.multiplier, body.roundNumber);
-      return sendJson(res, result.ok ? 200 : 400, result);
+      return reply(result.ok ? 200 : 400, result);
     }
 
     // Admin Bot Webhook Endpoint
@@ -207,11 +251,11 @@ const server = http.createServer(async (req, res) => {
       const expectedSecret = process.env.TELEGRAM_WEBHOOK_SECRET;
       const incomingSecret = req.headers['x-telegram-bot-api-secret-token'];
       if (expectedSecret && incomingSecret && incomingSecret !== expectedSecret) {
-        return sendJson(res, 403, { ok: false, error: 'Invalid webhook secret' });
+        return reply(403, { ok: false, error: 'Invalid webhook secret' });
       }
       const update = await readJsonBody(req);
       await handleTelegramUpdate(update);
-      return sendJson(res, 200, { ok: true });
+      return reply(200, { ok: true });
     }
 
     // Signal Bot Webhook Endpoint (completely separate from Admin Bot)
@@ -219,36 +263,36 @@ const server = http.createServer(async (req, res) => {
       const expectedSecret = process.env.TELEGRAM_WEBHOOK_SECRET;
       const incomingSecret = req.headers['x-telegram-bot-api-secret-token'];
       if (expectedSecret && incomingSecret && incomingSecret !== expectedSecret) {
-        return sendJson(res, 403, { ok: false, error: 'Invalid webhook secret' });
+        return reply(403, { ok: false, error: 'Invalid webhook secret' });
       }
       const update = await readJsonBody(req);
       await handleSignalBotUpdate(update);
-      return sendJson(res, 200, { ok: true });
+      return reply(200, { ok: true });
     }
 
     // Admin API endpoints
     if (req.method === 'GET' && pathname === '/api/admin/pending') {
       const adminHeader = String(req.headers['x-admin-id'] || '');
       if (process.env.TELEGRAM_ADMIN_ID && adminHeader !== String(process.env.TELEGRAM_ADMIN_ID)) {
-        return sendJson(res, 403, { ok: false, error: 'Forbidden' });
+        return reply(403, { ok: false, error: 'Forbidden' });
       }
-      return sendJson(res, 200, { ok: true, requests: getPendingRequests() });
+      return reply(200, { ok: true, requests: getPendingRequests() });
     }
 
     if (req.method === 'POST' && pathname === '/api/admin/resolve') {
       const adminHeader = String(req.headers['x-admin-id'] || '');
       if (process.env.TELEGRAM_ADMIN_ID && adminHeader !== String(process.env.TELEGRAM_ADMIN_ID)) {
-        return sendJson(res, 403, { ok: false, error: 'Forbidden' });
+        return reply(403, { ok: false, error: 'Forbidden' });
       }
       const body = await readJsonBody(req);
       const result = resolveWalletRequest(body.requestId, body.decision, 'admin-api');
-      return sendJson(res, result.ok ? 200 : 400, result);
+      return reply(result.ok ? 200 : 400, result);
     }
 
-    sendJson(res, 404, { ok: false, error: 'Endpoint tapılmadı' });
+    reply(404, { ok: false, error: 'Endpoint tapılmadı' });
   } catch (err) {
     console.error('[Server] Error:', err);
-    sendJson(res, 500, { ok: false, error: 'Daxili server xətası' });
+    reply(500, { ok: false, error: 'Daxili server xətası' });
   }
 });
 
