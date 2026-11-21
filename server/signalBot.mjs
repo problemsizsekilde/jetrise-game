@@ -82,14 +82,22 @@ function buildAccessDeniedMessage(telegramId) {
   ].join('\n');
 }
 
-function buildSignalCardMessage(trialRemaining = null) {
-  const { accessPriceAzn, adminContact } = getSignalBotConfig();
-  const sig = buildSignalForNow(Date.now());
-  const takeoffTimeStr = new Date(sig.takeoffAt).toLocaleTimeString('az-AZ', {
+function formatBakuTime(timestampMs) {
+  return new Intl.DateTimeFormat('az-AZ', {
+    timeZone: 'Asia/Baku',
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
-  });
+    hour12: false,
+  }).format(new Date(timestampMs));
+}
+
+function buildSignalCardMessage(trialRemaining = null) {
+  const { accessPriceAzn, adminContact } = getSignalBotConfig();
+  const nowMs = Date.now();
+  const sig = buildSignalForNow(nowMs);
+  const takeoffMs = Math.max(sig.takeoffAt, nowMs + sig.startsInSec * 1000);
+  const takeoffTimeStr = formatBakuTime(takeoffMs);
 
   const isTrial = trialRemaining !== null;
   const roundLabel = sig.isCurrentRound ? 'Cari raund' : 'Növbəti raund';

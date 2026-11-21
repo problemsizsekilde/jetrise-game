@@ -106,7 +106,18 @@ function formatRequestMessage(request, user, statusLine = null) {
     lines.push(`<b>Qəbz faylı:</b> <code>${escapeHtml(request.receiptFileName)}</code>`);
   }
 
-  lines.push(`<b>Vaxt:</b> ${new Date(request.createdAt).toLocaleString('az-AZ')}`);
+  lines.push(
+    `<b>Vaxt:</b> ${new Intl.DateTimeFormat('az-AZ', {
+      timeZone: 'Asia/Baku',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    }).format(new Date(request.createdAt))}`
+  );
 
   if (statusLine) {
     lines.push('', statusLine);
