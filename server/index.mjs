@@ -138,14 +138,26 @@ const server = http.createServer(async (req, res) => {
 
     // Health & shared clock sync
     if (req.method === 'GET' && (pathname === '/api/health' || pathname === '/health')) {
+      const hasAdminBotToken = Boolean(
+        process.env.TELEGRAM_ADMIN_BOT_TOKEN ||
+          process.env.TELEGRAM_BOT_TOKEN ||
+          process.env.ADMIN_BOT_TOKEN
+      );
+      const hasAdminId = Boolean(
+        process.env.TELEGRAM_ADMIN_ID ||
+          process.env.TELEGRAM_ADMIN_CHAT_ID ||
+          process.env.ADMIN_CHAT_ID ||
+          process.env.ADMIN_ID
+      );
+      const hasSignalBotToken = Boolean(process.env.TELEGRAM_SIGNAL_BOT_TOKEN);
+
       return reply(200, {
         ok: true,
         serverTimeMs: Date.now(),
-        adminBotConfigured: Boolean(
-          (process.env.TELEGRAM_ADMIN_BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN) &&
-            process.env.TELEGRAM_ADMIN_ID
-        ),
-        signalBotConfigured: Boolean(process.env.TELEGRAM_SIGNAL_BOT_TOKEN),
+        hasAdminBotToken,
+        hasAdminId,
+        adminBotConfigured: hasAdminBotToken && hasAdminId,
+        signalBotConfigured: hasSignalBotToken,
       });
     }
 
@@ -249,11 +261,22 @@ const server = http.createServer(async (req, res) => {
       }
 
       const tgResult = await notifyAdminNewRequest(result.request, result.user);
+      const telegramSent = Boolean(tgResult?.ok);
+      const telegramError = telegramSent
+        ? null
+        : tgResult?.error || tgResult?.description || 'Telegram bildirişi göndərilə bilmədi';
+
+      if (!telegramSent) {
+        console.error(`[WalletRequest ${result.request.id}] Telegram bildirişi uğursuz:`, telegramError);
+      }
+
       return reply(201, {
         ok: true,
         request: result.request,
         user: result.user,
-        telegramNotified: Boolean(tgResult?.ok),
+        telegramSent,
+        telegramNotified: telegramSent,
+        telegramError,
       });
     }
 

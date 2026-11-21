@@ -13,7 +13,9 @@ export interface CreateRequestResponse {
   error?: string;
   request?: WalletRequest;
   user?: UserProfile;
+  telegramSent?: boolean;
   telegramNotified?: boolean;
+  telegramError?: string | null;
 }
 
 export interface AuthResponse {

@@ -11,9 +11,24 @@ import {
 } from './db.mjs';
 
 function getAdminBotConfig() {
+  const token = (
+    process.env.TELEGRAM_ADMIN_BOT_TOKEN ||
+    process.env.TELEGRAM_BOT_TOKEN ||
+    process.env.ADMIN_BOT_TOKEN ||
+    ''
+  ).trim();
+
+  const adminId = String(
+    process.env.TELEGRAM_ADMIN_ID ||
+      process.env.TELEGRAM_ADMIN_CHAT_ID ||
+      process.env.ADMIN_CHAT_ID ||
+      process.env.ADMIN_ID ||
+      ''
+  ).trim();
+
   return {
-    token: process.env.TELEGRAM_ADMIN_BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN || '',
-    adminId: String(process.env.TELEGRAM_ADMIN_ID || '').trim(),
+    token,
+    adminId,
     mode: (process.env.TELEGRAM_MODE || 'polling').toLowerCase(),
   };
 }
@@ -116,12 +131,17 @@ function buildRequestKeyboard(requestId) {
 export async function notifyAdminNewRequest(request, user) {
   const { token, adminId } = getAdminBotConfig();
   if (!token || !adminId) {
-    console.warn('[AdminBot] Token və ya Admin ID təyin edilməyib, bildiriş ötürüldü.');
-    return { ok: false, skipped: true };
+    const missing = [!token && 'TELEGRAM_ADMIN_BOT_TOKEN', !adminId && 'TELEGRAM_ADMIN_ID']
+      .filter(Boolean)
+      .join(', ');
+    const reason = `Render mühit dəyişənləri çatışmır: ${missing}`;
+    console.error(`[AdminBot] ${reason}`);
+    return { ok: false, skipped: true, error: reason };
   }
 
   const caption = formatRequestMessage(request, user);
   const replyMarkup = buildRequestKeyboard(request.id);
+  let lastError = null;
 
   try {
     // Send photo or document if receipt file exists on disk
@@ -129,20 +149,24 @@ export async function notifyAdminNewRequest(request, user) {
       const fileBuf = fs.readFileSync(request.receiptPath);
       const mime = request.receiptMimeType || 'application/octet-stream';
       const isImage = mime.startsWith('image/');
-      const form = new FormData();
-      form.append('chat_id', adminId);
-      form.append('caption', caption);
-      form.append('parse_mode', 'HTML');
-      form.append('reply_markup', JSON.stringify(replyMarkup));
-
       const blob = new Blob([fileBuf], { type: mime });
       const fileName = request.receiptFileName || `${request.id}.jpg`;
 
       if (isImage) {
+        const form = new FormData();
+        form.append('chat_id', adminId);
+        form.append('caption', caption);
+        form.append('parse_mode', 'HTML');
+        form.append('reply_markup', JSON.stringify(replyMarkup));
         form.append('photo', blob, fileName);
+
         const res = await adminTgMultipart('sendPhoto', form);
-        if (res.ok) return res;
-        console.warn('[AdminBot] sendPhoto alınmadı, sendDocument yoxlanılır:', res.description);
+        if (res.ok) {
+          console.log(`[AdminBot] Depozit/qəbz (photo) göndərildi: ${request.id}`);
+          return res;
+        }
+        lastError = `sendPhoto: ${res.description || JSON.stringify(res)}`;
+        console.error('[AdminBot] sendPhoto xətası:', lastError);
       }
 
       const docForm = new FormData();
@@ -151,9 +175,14 @@ export async function notifyAdminNewRequest(request, user) {
       docForm.append('parse_mode', 'HTML');
       docForm.append('reply_markup', JSON.stringify(replyMarkup));
       docForm.append('document', blob, fileName);
+
       const docRes = await adminTgMultipart('sendDocument', docForm);
-      if (docRes.ok) return docRes;
-      console.warn('[AdminBot] sendDocument alınmadı, sendMessage göndərilir:', docRes.description);
+      if (docRes.ok) {
+        console.log(`[AdminBot] Depozit/qəbz (document) göndərildi: ${request.id}`);
+        return docRes;
+      }
+      lastError = `sendDocument: ${docRes.description || JSON.stringify(docRes)}`;
+      console.error('[AdminBot] sendDocument xətası:', lastError);
     }
 
     const res = await adminTgApi('sendMessage', {
@@ -163,12 +192,16 @@ export async function notifyAdminNewRequest(request, user) {
       reply_markup: replyMarkup,
     });
     if (!res.ok) {
-      console.error('[AdminBot] sendMessage xətası:', res.description);
+      const errMsg = res.description || JSON.stringify(res);
+      console.error('[AdminBot] sendMessage xətası:', errMsg, '| chat_id:', adminId);
+      return { ok: false, error: errMsg };
     }
+    console.log(`[AdminBot] Bildiriş (text) göndərildi: ${request.id}`);
     return res;
   } catch (err) {
-    console.error('[AdminBot] Bildiriş göndərilmədi:', err.message);
-    return { ok: false, error: err.message };
+    const errMsg = err instanceof Error ? err.message : String(err);
+    console.error('[AdminBot] Telegram API şəbəkə/istisna xətası:', errMsg, '| prev:', lastError);
+    return { ok: false, error: errMsg || lastError || 'Unknown Telegram error' };
   }
 }
 

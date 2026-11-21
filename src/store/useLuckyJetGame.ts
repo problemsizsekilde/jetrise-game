@@ -666,7 +666,9 @@ export function useLuckyJetGame() {
       ok: boolean;
       error?: string;
       request?: WalletRequest;
+      telegramSent?: boolean;
       telegramNotified?: boolean;
+      telegramError?: string | null;
     }> => {
       soundEngine.unlock();
       const activeUser = userRef.current;
@@ -710,7 +712,9 @@ export function useLuckyJetGame() {
       return {
         ok: true,
         request: res.request,
+        telegramSent: res.telegramSent ?? res.telegramNotified,
         telegramNotified: res.telegramNotified,
+        telegramError: res.telegramError ?? null,
       };
     },
     [syncWithBackend]

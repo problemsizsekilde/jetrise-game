@@ -51,7 +51,9 @@ interface WalletModalProps {
     ok: boolean;
     error?: string;
     request?: WalletRequest;
+    telegramSent?: boolean;
     telegramNotified?: boolean;
+    telegramError?: string | null;
   }>;
   onRefresh: () => Promise<void>;
 }
@@ -223,10 +225,18 @@ export function WalletModal({
 
     setPaymentDetails('');
     clearReceipt();
-    setFeedback({
-      kind: 'success',
-      text: `${res.request?.id || ''} sorğusu qeydə alındı (Gözləmədə). Admin Telegram üzərindən təsdiq etdikdə balansınız avtomatik yenilənəcək.`,
-    });
+    if (res.telegramSent === false) {
+      console.warn('[LuckyJet] Telegram admin bildirişi göndərilmədi:', res.telegramError);
+      setFeedback({
+        kind: 'success',
+        text: `${res.request?.id || ''} qeydə alındı, lakin Telegram bildirişi getmədi: ${res.telegramError || 'Bot ayarlarını yoxlayın.'}`,
+      });
+    } else {
+      setFeedback({
+        kind: 'success',
+        text: `${res.request?.id || ''} sorğusu qeydə alındı (Gözləmədə). Admin Telegram üzərindən təsdiq etdikdə balansınız avtomatik yenilənəcək.`,
+      });
+    }
   };
 
   const presets = tab === 'deposit' ? activeMethod.quickAmounts : WITHDRAW_PRESETS;
