@@ -30,6 +30,9 @@ function getSignalBotConfig() {
     token,
     adminToken,
     adminContact: process.env.TELEGRAM_ADMIN_CONTACT || `Admin (ID: ${adminId})`,
+    gameUrl: String(process.env.GAME_URL || 'https://jetrise-game-300.vercel.app')
+      .trim()
+      .replace(/\/+$/, ''),
     accessPriceAzn: Number(process.env.SIGNAL_ACCESS_PRICE_AZN || 55),
     testPriceAzn: Number(process.env.SIGNAL_TEST_PRICE_AZN || 2),
     cooldownSec: Number(process.env.SIGNAL_COOLDOWN_SECONDS || 12),
@@ -66,6 +69,15 @@ const MAIN_REPLY_KEYBOARD = {
 const SIGNAL_INLINE_KEYBOARD = {
   inline_keyboard: [[{ text: '🚀 Siqnal Al', callback_data: 'signal:get' }]],
 };
+
+function buildSignalMessageKeyboard(includeNextSignal = true) {
+  const { gameUrl } = getSignalBotConfig();
+  const rows = [[{ text: 'Oyuna başla', url: gameUrl }]];
+  if (includeNextSignal) {
+    rows.push([{ text: '🚀 Siqnal Al', callback_data: 'signal:get' }]);
+  }
+  return { inline_keyboard: rows };
+}
 
 function buildAccessDeniedMessage(telegramId) {
   const { accessPriceAzn, testPriceAzn, adminContact } = getSignalBotConfig();
@@ -170,7 +182,7 @@ async function sendSignalResponse(chatId, telegramId) {
       chat_id: chatId,
       parse_mode: 'HTML',
       text: buildSignalCardMessage(null),
-      reply_markup: SIGNAL_INLINE_KEYBOARD,
+      reply_markup: buildSignalMessageKeyboard(true),
     });
     return;
   }
@@ -210,7 +222,7 @@ async function sendSignalResponse(chatId, telegramId) {
       chat_id: chatId,
       parse_mode: 'HTML',
       text: buildSignalCardMessage(consumed.remaining),
-      reply_markup: consumed.remaining > 0 ? SIGNAL_INLINE_KEYBOARD : MAIN_REPLY_KEYBOARD,
+      reply_markup: buildSignalMessageKeyboard(consumed.remaining > 0),
     });
     return;
   }
