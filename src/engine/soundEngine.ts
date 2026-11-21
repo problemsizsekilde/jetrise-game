@@ -1,9 +1,15 @@
 const SOUND_STORAGE_KEY = 'lucky_jet_sound_enabled';
+const MASTER_GAIN_LEVEL = 0.3; // Soft ceiling within 0.25 - 0.35
 
 class SoundEngine {
   private ctx: AudioContext | null = null;
+  private masterGain: GainNode | null = null;
   private enabled: boolean;
+
   private flightOsc: OscillatorNode | null = null;
+  private flightHarmonicOsc: OscillatorNode | null = null;
+  private flightAirNode: AudioBufferSourceNode | null = null;
+  private flightAirFilter: BiquadFilterNode | null = null;
   private flightGain: GainNode | null = null;
 
   constructor() {
@@ -11,7 +17,7 @@ class SoundEngine {
     this.enabled = saved === null ? true : saved === 'true';
   }
 
-  private ensureContext(): AudioContext | null {
+  private ensureContext(): { ctx: AudioContext; out: GainNode } | null {
     if (!this.enabled || typeof window === 'undefined') return null;
     if (!this.ctx) {
       const AudioCtx =
@@ -19,11 +25,17 @@ class SoundEngine {
         (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       if (!AudioCtx) return null;
       this.ctx = new AudioCtx();
+      this.masterGain = this.ctx.createGain();
+      this.masterGain.gain.setValueAtTime(MASTER_GAIN_LEVEL, this.ctx.currentTime);
+      this.masterGain.connect(this.ctx.destination);
     }
     if (this.ctx.state === 'suspended') {
       this.ctx.resume().catch(() => {});
     }
-    return this.ctx;
+    if (this.masterGain) {
+      this.masterGain.gain.setTargetAtTime(MASTER_GAIN_LEVEL, this.ctx.currentTime, 0.02);
+    }
+    return this.masterGain ? { ctx: this.ctx, out: this.masterGain } : null;
   }
 
   public unlock(): void {
@@ -43,6 +55,23 @@ class SoundEngine {
     }
     if (!value) {
       this.stopFlightHum();
+      if (this.masterGain && this.ctx) {
+        try {
+          const now = this.ctx.currentTime;
+          this.masterGain.gain.cancelScheduledValues(now);
+          this.masterGain.gain.setTargetAtTime(0.0001, now, 0.01);
+        } catch {
+          // ignore
+        }
+      }
+    } else if (this.masterGain && this.ctx) {
+      try {
+        const now = this.ctx.currentTime;
+        this.masterGain.gain.cancelScheduledValues(now);
+        this.masterGain.gain.setTargetAtTime(MASTER_GAIN_LEVEL, now, 0.02);
+      } catch {
+        // ignore
+      }
     }
   }
 
@@ -55,62 +84,74 @@ class SoundEngine {
   }
 
   public playClick(): void {
-    const ctx = this.ensureContext();
-    if (!ctx) return;
+    const audio = this.ensureContext();
+    if (!audio) return;
+    const { ctx, out } = audio;
     const now = ctx.currentTime;
+
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     osc.type = 'sine';
-    osc.frequency.setValueAtTime(620, now);
-    osc.frequency.exponentialRampToValueAtTime(920, now + 0.06);
-    gain.gain.setValueAtTime(0.08, now);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.07);
+    osc.frequency.setValueAtTime(420, now);
+    osc.frequency.exponentialRampToValueAtTime(580, now + 0.055);
+
+    gain.gain.setValueAtTime(0.001, now);
+    gain.gain.linearRampToValueAtTime(0.14, now + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.075);
+
     osc.connect(gain);
-    gain.connect(ctx.destination);
+    gain.connect(out);
     osc.start(now);
-    osc.stop(now + 0.08);
+    osc.stop(now + 0.085);
   }
 
   public playCountdownTick(finalTick = false): void {
-    const ctx = this.ensureContext();
-    if (!ctx) return;
+    const audio = this.ensureContext();
+    if (!audio) return;
+    const { ctx, out } = audio;
     const now = ctx.currentTime;
+
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
-    osc.type = 'triangle';
-    osc.frequency.setValueAtTime(finalTick ? 880 : 520, now);
-    gain.gain.setValueAtTime(finalTick ? 0.09 : 0.05, now);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.09);
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(finalTick ? 520 : 360, now);
+
+    gain.gain.setValueAtTime(0.001, now);
+    gain.gain.linearRampToValueAtTime(finalTick ? 0.14 : 0.08, now + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.1);
+
     osc.connect(gain);
-    gain.connect(ctx.destination);
+    gain.connect(out);
     osc.start(now);
-    osc.stop(now + 0.1);
+    osc.stop(now + 0.11);
   }
 
   public playTakeoff(): void {
-    const ctx = this.ensureContext();
-    if (!ctx) return;
+    const audio = this.ensureContext();
+    if (!audio) return;
+    const { ctx, out } = audio;
     const now = ctx.currentTime;
 
-    // Rising jet ignition whoosh
+    // Soft warm sine swell (120Hz -> 185Hz) through lowpass filter
     const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = 'sawtooth';
-    osc.frequency.setValueAtTime(140, now);
-    osc.frequency.exponentialRampToValueAtTime(520, now + 0.35);
-
     const filter = ctx.createBiquadFilter();
+    const gain = ctx.createGain();
+
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(120, now);
+    osc.frequency.exponentialRampToValueAtTime(185, now + 0.34);
+
     filter.type = 'lowpass';
-    filter.frequency.setValueAtTime(400, now);
-    filter.frequency.exponentialRampToValueAtTime(2200, now + 0.35);
+    filter.frequency.setValueAtTime(340, now);
+    filter.frequency.exponentialRampToValueAtTime(560, now + 0.34);
 
     gain.gain.setValueAtTime(0.001, now);
-    gain.gain.linearRampToValueAtTime(0.09, now + 0.08);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.42);
+    gain.gain.linearRampToValueAtTime(0.18, now + 0.1);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.42);
 
     osc.connect(filter);
     filter.connect(gain);
-    gain.connect(ctx.destination);
+    gain.connect(out);
     osc.start(now);
     osc.stop(now + 0.45);
 
@@ -118,125 +159,189 @@ class SoundEngine {
   }
 
   private startFlightHum(): void {
-    const ctx = this.ensureContext();
-    if (!ctx) return;
+    const audio = this.ensureContext();
+    if (!audio) return;
+    const { ctx, out } = audio;
     this.stopFlightHum();
 
     const now = ctx.currentTime;
+    const flightGain = ctx.createGain();
+    flightGain.gain.setValueAtTime(0.0001, now);
+    flightGain.gain.linearRampToValueAtTime(0.16, now + 0.35);
+    flightGain.connect(out);
+
+    // Primary warm sine (120Hz -> 240Hz during flight)
     const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    const filter = ctx.createBiquadFilter();
-
     osc.type = 'sine';
-    osc.frequency.setValueAtTime(180, now);
-    filter.type = 'lowpass';
-    filter.frequency.setValueAtTime(600, now);
+    osc.frequency.setValueAtTime(120, now);
 
-    gain.gain.setValueAtTime(0.001, now);
-    gain.gain.linearRampToValueAtTime(0.025, now + 0.25);
+    // Subtle soft triangle sub-layer
+    const harmonic = ctx.createOscillator();
+    const harmonicGain = ctx.createGain();
+    harmonic.type = 'triangle';
+    harmonic.frequency.setValueAtTime(120, now);
+    harmonicGain.gain.setValueAtTime(0.28, now);
 
-    osc.connect(filter);
-    filter.connect(gain);
-    gain.connect(ctx.destination);
+    const toneFilter = ctx.createBiquadFilter();
+    toneFilter.type = 'lowpass';
+    toneFilter.frequency.setValueAtTime(360, now);
+
+    osc.connect(toneFilter);
+    harmonic.connect(harmonicGain);
+    harmonicGain.connect(toneFilter);
+    toneFilter.connect(flightGain);
+
+    // Very soft lowpass-filtered air flow (looping brown-ish noise buffer)
+    const airLen = Math.floor(ctx.sampleRate * 1.5);
+    const airBuffer = ctx.createBuffer(1, airLen, ctx.sampleRate);
+    const airData = airBuffer.getChannelData(0);
+    let lastOut = 0;
+    for (let i = 0; i < airLen; i++) {
+      const white = Math.random() * 2 - 1;
+      lastOut = (lastOut + 0.03 * white) / 1.03;
+      airData[i] = lastOut * 2.2;
+    }
+
+    const airSource = ctx.createBufferSource();
+    airSource.buffer = airBuffer;
+    airSource.loop = true;
+
+    const airFilter = ctx.createBiquadFilter();
+    airFilter.type = 'lowpass';
+    airFilter.frequency.setValueAtTime(280, now);
+
+    const airGain = ctx.createGain();
+    airGain.gain.setValueAtTime(0.22, now);
+
+    airSource.connect(airFilter);
+    airFilter.connect(airGain);
+    airGain.connect(flightGain);
+
     osc.start(now);
+    harmonic.start(now);
+    airSource.start(now);
 
     this.flightOsc = osc;
-    this.flightGain = gain;
+    this.flightHarmonicOsc = harmonic;
+    this.flightAirNode = airSource;
+    this.flightAirFilter = airFilter;
+    this.flightGain = flightGain;
   }
 
   public updateFlightPitch(multiplier: number): void {
     if (!this.flightOsc || !this.ctx || !this.enabled) return;
-    const clamped = Math.min(multiplier, 30);
-    const freq = 180 + Math.log(clamped) * 140;
-    this.flightOsc.frequency.setTargetAtTime(freq, this.ctx.currentTime, 0.08);
+    const clamped = Math.max(1, Math.min(multiplier, 30));
+    // Smooth low-frequency range: 120Hz -> 240Hz
+    const progress = Math.min(1, Math.log(clamped) / Math.log(30));
+    const freq = 120 + progress * 120;
+    const now = this.ctx.currentTime;
+
+    this.flightOsc.frequency.setTargetAtTime(freq, now, 0.12);
+    if (this.flightHarmonicOsc) {
+      this.flightHarmonicOsc.frequency.setTargetAtTime(freq * 0.5, now, 0.12);
+    }
+    if (this.flightAirFilter) {
+      this.flightAirFilter.frequency.setTargetAtTime(280 + progress * 220, now, 0.12);
+    }
   }
 
   public stopFlightHum(): void {
-    if (this.flightGain && this.ctx) {
+    const osc = this.flightOsc;
+    const harm = this.flightHarmonicOsc;
+    const air = this.flightAirNode;
+    const gain = this.flightGain;
+
+    this.flightOsc = null;
+    this.flightHarmonicOsc = null;
+    this.flightAirNode = null;
+    this.flightAirFilter = null;
+    this.flightGain = null;
+
+    if (gain && this.ctx) {
       try {
-        this.flightGain.gain.setTargetAtTime(0.0001, this.ctx.currentTime, 0.03);
+        const now = this.ctx.currentTime;
+        gain.gain.cancelScheduledValues(now);
+        gain.gain.setTargetAtTime(0.0001, now, 0.025);
       } catch {
         // ignore
       }
     }
-    if (this.flightOsc) {
-      const osc = this.flightOsc;
-      this.flightOsc = null;
-      this.flightGain = null;
-      setTimeout(() => {
+
+    setTimeout(() => {
+      for (const node of [osc, harm, air]) {
+        if (!node) continue;
         try {
-          osc.stop();
-          osc.disconnect();
+          node.stop();
+          node.disconnect();
         } catch {
           // ignore
         }
-      }, 80);
-    }
+      }
+      if (gain) {
+        try {
+          gain.disconnect();
+        } catch {
+          // ignore
+        }
+      }
+    }, 80);
   }
 
   public playCashout(): void {
-    const ctx = this.ensureContext();
-    if (!ctx) return;
+    const audio = this.ensureContext();
+    if (!audio) return;
+    const { ctx, out } = audio;
     const now = ctx.currentTime;
-    const notes = [523.25, 659.25, 783.99, 1046.5]; // C5, E5, G5, C6
+
+    // Gentle warm ascending chord (C5, E5, G5)
+    const notes = [523.25, 659.25, 783.99];
     notes.forEach((freq, i) => {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
-      osc.type = 'triangle';
-      const start = now + i * 0.055;
+      osc.type = 'sine';
+      const start = now + i * 0.06;
       osc.frequency.setValueAtTime(freq, start);
+
       gain.gain.setValueAtTime(0.001, start);
-      gain.gain.linearRampToValueAtTime(0.11, start + 0.015);
-      gain.gain.exponentialRampToValueAtTime(0.001, start + 0.26);
+      gain.gain.linearRampToValueAtTime(0.18, start + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.28);
+
       osc.connect(gain);
-      gain.connect(ctx.destination);
+      gain.connect(out);
       osc.start(start);
-      osc.stop(start + 0.28);
+      osc.stop(start + 0.3);
     });
   }
 
   public playCrash(): void {
     this.stopFlightHum();
-    const ctx = this.ensureContext();
-    if (!ctx) return;
+    const audio = this.ensureContext();
+    if (!audio) return;
+    const { ctx, out } = audio;
     const now = ctx.currentTime;
 
-    // 1. Descending boom/fly-away tone
+    // Soft, rounded low-frequency fade-down (140Hz -> 45Hz), zero harsh buzz or crackle
     const osc = ctx.createOscillator();
-    const oscGain = ctx.createGain();
-    osc.type = 'sawtooth';
-    osc.frequency.setValueAtTime(320, now);
-    osc.frequency.exponentialRampToValueAtTime(52, now + 0.42);
-    oscGain.gain.setValueAtTime(0.14, now);
-    oscGain.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
-    osc.connect(oscGain);
-    oscGain.connect(ctx.destination);
-    osc.start(now);
-    osc.stop(now + 0.46);
-
-    // 2. Short filtered noise burst
-    const bufferSize = Math.floor(ctx.sampleRate * 0.28);
-    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-    const data = buffer.getChannelData(0);
-    for (let i = 0; i < bufferSize; i++) {
-      data[i] = (Math.random() * 2 - 1) * (1 - i / bufferSize);
-    }
-    const noise = ctx.createBufferSource();
-    noise.buffer = buffer;
-
     const filter = ctx.createBiquadFilter();
-    filter.type = 'bandpass';
-    filter.frequency.setValueAtTime(750, now);
-    filter.Q.setValueAtTime(0.9, now);
+    const gain = ctx.createGain();
 
-    const noiseGain = ctx.createGain();
-    noiseGain.gain.setValueAtTime(0.12, now);
-    noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.28);
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(140, now);
+    osc.frequency.exponentialRampToValueAtTime(45, now + 0.36);
 
-    noise.connect(filter);
-    filter.connect(noiseGain);
-    noiseGain.connect(ctx.destination);
-    noise.start(now);
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(240, now);
+    filter.frequency.exponentialRampToValueAtTime(90, now + 0.36);
+
+    gain.gain.setValueAtTime(0.001, now);
+    gain.gain.linearRampToValueAtTime(0.28, now + 0.025);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.42);
+
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(out);
+    osc.start(now);
+    osc.stop(now + 0.45);
   }
 }
 
