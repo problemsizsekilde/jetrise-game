@@ -223,7 +223,7 @@ async function sendSignalResponse(chatId, telegramId) {
         chat_id: chatId,
         parse_mode: 'HTML',
         text: buildAccessDeniedMessage(cleanId),
-        reply_markup: MAIN_REPLY_KEYBOARD,
+        reply_markup: buildSignalMessageKeyboard(false),
       });
       return;
     }
@@ -239,12 +239,12 @@ async function sendSignalResponse(chatId, telegramId) {
     return;
   }
 
-  // 3. Aktiv haqqı qalmayıb -> 55 AZN giriş məlumatı
+  // 3. Aktiv haqqı qalmayıb -> 55 AZN giriş məlumatı + Oyuna başla düyməsi
   await signalTgApi('sendMessage', {
     chat_id: chatId,
     parse_mode: 'HTML',
     text: buildAccessDeniedMessage(cleanId),
-    reply_markup: MAIN_REPLY_KEYBOARD,
+    reply_markup: buildSignalMessageKeyboard(false),
   });
 }
 
@@ -285,7 +285,7 @@ export async function handleSignalBotUpdate(update) {
           '',
           'Canlı raund siqnalı almaq üçün aşağıdakı <b>🚀 Siqnal Al</b> düyməsinə basın.',
         ].join('\n'),
-        reply_markup: MAIN_REPLY_KEYBOARD,
+        reply_markup: buildSignalMessageKeyboard(true),
       });
       return;
     }
@@ -310,7 +310,7 @@ export async function handleSignalBotUpdate(update) {
           chat_id: chatId,
           parse_mode: 'HTML',
           text: buildAccessDeniedMessage(fromId),
-          reply_markup: MAIN_REPLY_KEYBOARD,
+          reply_markup: buildSignalMessageKeyboard(false),
         });
       }
       return;
@@ -324,7 +324,7 @@ export async function handleSignalBotUpdate(update) {
     await signalTgApi('sendMessage', {
       chat_id: chatId,
       text: 'Siqnal almaq üçün "🚀 Siqnal Al" düyməsini sıxın.',
-      reply_markup: MAIN_REPLY_KEYBOARD,
+      reply_markup: buildSignalMessageKeyboard(true),
     });
   }
 }
