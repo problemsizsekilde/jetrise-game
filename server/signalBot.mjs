@@ -84,7 +84,7 @@ const SIGNAL_INLINE_KEYBOARD = {
 
 function buildSignalMessageKeyboard(includeNextSignal = true) {
   const { gameUrl } = getSignalBotConfig();
-  const rows = [[{ text: 'Oyuna başla', url: gameUrl }]];
+  const rows = [[{ text: 'Oyuna başla', web_app: { url: gameUrl } }]];
   if (includeNextSignal) {
     rows.push([{ text: '🚀 Siqnal Al', callback_data: 'signal:get' }]);
   }
