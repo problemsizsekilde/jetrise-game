@@ -41,7 +41,9 @@ export function Header({
       <div className="lj-header-left">
         <div className="lj-brand">
           {VISUAL_ASSETS.logoPng ? (
-            <img src={VISUAL_ASSETS.logoPng} alt="Lucky Jet" className="lj-brand-img" />
+            <div className="lj-brand-badge">
+              <img src={VISUAL_ASSETS.logoPng} alt="Lucky Jet Logo" className="lj-brand-img" />
+            </div>
           ) : (
             <div className="lj-brand-badge" aria-hidden="true">
               <svg viewBox="0 0 36 36" fill="none" className="lj-brand-svg">

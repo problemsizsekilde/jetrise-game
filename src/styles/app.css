@@ -96,20 +96,22 @@ input {
 }
 
 .lj-brand-badge {
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
+  width: 42px;
+  height: 42px;
+  border-radius: 11px;
   overflow: hidden;
+  border: 1px solid rgba(192, 132, 252, 0.4);
+  background: #120826;
   box-shadow: 0 0 18px rgba(168, 85, 247, 0.45);
   flex-shrink: 0;
 }
 
 .lj-brand-svg,
 .lj-brand-img {
-  width: 36px;
-  height: 36px;
+  width: 100%;
+  height: 100%;
   display: block;
-  object-fit: contain;
+  object-fit: cover;
 }
 
 .lj-brand-text {

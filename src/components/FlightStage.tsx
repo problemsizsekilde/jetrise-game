@@ -26,23 +26,125 @@ interface Particle {
   color: string;
 }
 
+/**
+ * Removes solid dark outer background from flyer.png via edge flood-fill
+ * with soft alpha feathering so the character blends seamlessly into the
+ * purple-dark space canvas without any square borders.
+ */
+function createTransparentSprite(img: HTMLImageElement): HTMLCanvasElement {
+  const w = img.naturalWidth || 256;
+  const h = img.naturalHeight || 256;
+  const off = document.createElement('canvas');
+  off.width = w;
+  off.height = h;
+  const octx = off.getContext('2d');
+  if (!octx) return off;
+
+  octx.drawImage(img, 0, 0, w, h);
+  const imgData = octx.getImageData(0, 0, w, h);
+  const data = imgData.data;
+
+  // Sample background color from top-left pixel
+  const bgR = data[0];
+  const bgG = data[1];
+  const bgB = data[2];
+
+  // If image already has transparency at corners, return as-is
+  if (data[3] < 20) return off;
+
+  const total = w * h;
+  const visited = new Uint8Array(total);
+  const queue = new Int32Array(total);
+  let head = 0;
+  let tail = 0;
+
+  const colorDist = (idx4: number) => {
+    const dr = data[idx4] - bgR;
+    const dg = data[idx4 + 1] - bgG;
+    const db = data[idx4 + 2] - bgB;
+    return Math.sqrt(dr * dr + dg * dg + db * db);
+  };
+
+  const hardThresh = 32;
+  const softThresh = 56;
+
+  const enqueue = (x: number, y: number) => {
+    const p = y * w + x;
+    if (visited[p]) return;
+    const d = colorDist(p * 4);
+    if (d <= softThresh) {
+      visited[p] = 1;
+      queue[tail++] = p;
+    }
+  };
+
+  // Seed flood-fill from all 4 borders
+  for (let x = 0; x < w; x++) {
+    enqueue(x, 0);
+    enqueue(x, h - 1);
+  }
+  for (let y = 0; y < h; y++) {
+    enqueue(0, y);
+    enqueue(w - 1, y);
+  }
+
+  while (head < tail) {
+    const p = queue[head++];
+    const idx4 = p * 4;
+    const d = colorDist(idx4);
+
+    if (d <= hardThresh) {
+      data[idx4 + 3] = 0;
+      const x = p % w;
+      const y = (p - x) / w;
+      if (x > 0) enqueue(x - 1, y);
+      if (x < w - 1) enqueue(x + 1, y);
+      if (y > 0) enqueue(x, y - 1);
+      if (y < h - 1) enqueue(x, y + 1);
+    } else if (d <= softThresh) {
+      const alphaFactor = (d - hardThresh) / (softThresh - hardThresh);
+      data[idx4 + 3] = Math.round(data[idx4 + 3] * alphaFactor);
+    }
+  }
+
+  octx.putImageData(imgData, 0, 0);
+  return off;
+}
+
 function drawJetpackHero(
   ctx: CanvasRenderingContext2D,
   x: number,
   y: number,
   angle: number,
   flameScale: number,
-  customImg: HTMLImageElement | null
+  customSprite: HTMLCanvasElement | HTMLImageElement | null,
+  spriteSize = 104
 ) {
   ctx.save();
   ctx.translate(x, y);
   ctx.rotate(angle);
 
-  if (customImg && customImg.complete && customImg.naturalWidth > 0) {
-    const size = 78;
-    ctx.drawImage(customImg, -size / 2, -size / 2, size, size);
-    ctx.restore();
-    return;
+  if (customSprite) {
+    const isCanvas = customSprite instanceof HTMLCanvasElement;
+    const ready = isCanvas
+      ? customSprite.width > 0
+      : customSprite.complete && customSprite.naturalWidth > 0;
+    if (ready) {
+      if (flameScale > 0.7) {
+        const aura = ctx.createRadialGradient(-6, 6, 8, -6, 6, spriteSize * 0.56);
+        aura.addColorStop(0, 'rgba(251, 191, 36, 0.22)');
+        aura.addColorStop(0.55, 'rgba(168, 85, 247, 0.14)');
+        aura.addColorStop(1, 'rgba(168, 85, 247, 0)');
+        ctx.fillStyle = aura;
+        ctx.beginPath();
+        ctx.arc(-6, 6, spriteSize * 0.56, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      ctx.drawImage(customSprite, -spriteSize / 2, -spriteSize / 2, spriteSize, spriteSize);
+      ctx.restore();
+      return;
+    }
   }
 
   // Subtle plasma speed aura behind hero
@@ -179,19 +281,26 @@ export function FlightStage({ round }: FlightStageProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const roundRef = useRef<RoundSnapshot>(round);
 
-  const customCharImgRef = useRef<HTMLImageElement | null>(null);
+  const customCharSpriteRef = useRef<HTMLCanvasElement | HTMLImageElement | null>(null);
   const customBgImgRef = useRef<HTMLImageElement | null>(null);
 
   useEffect(() => {
     roundRef.current = round;
   }, [round]);
 
-  // Optional custom PNG preloading
+  // Custom PNG preloading with automatic dark-background removal for flyer
   useEffect(() => {
     if (VISUAL_ASSETS.characterPng) {
       const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        try {
+          customCharSpriteRef.current = createTransparentSprite(img);
+        } catch {
+          customCharSpriteRef.current = img;
+        }
+      };
       img.src = VISUAL_ASSETS.characterPng;
-      customCharImgRef.current = img;
     }
     if (VISUAL_ASSETS.stageBgPng) {
       const img = new Image();
@@ -353,9 +462,10 @@ export function FlightStage({ round }: FlightStageProps) {
           ctx,
           lastHeroPos.x,
           lastHeroPos.y,
-          -0.25,
+          -0.08,
           0.55,
-          customCharImgRef.current
+          customCharSpriteRef.current,
+          width < 520 ? 86 : 110
         );
       } else if (cur.phase === 'FLYING') {
         const t = Math.min(1, cur.elapsedFlightMs / 7500);
@@ -416,18 +526,34 @@ export function FlightStage({ round }: FlightStageProps) {
           });
         }
 
-        // Compute tangent angle at curve end
+        // Compute subtle tangent angle at curve end (flyer sprite already leans forward)
         const dx = targetX - ctrlX;
         const dy = targetY - ctrlY;
-        const angle = Math.atan2(dy, dx) * 0.45;
+        const angle = Math.atan2(dy, dx) * 0.22;
 
-        drawJetpackHero(ctx, targetX, targetY, angle, 1.15, customCharImgRef.current);
+        drawJetpackHero(
+          ctx,
+          targetX,
+          targetY,
+          angle,
+          1.15,
+          customCharSpriteRef.current,
+          width < 520 ? 90 : 116
+        );
       } else if (cur.phase === 'CRASHED') {
         crashAnimT += 0.045;
         if (crashAnimT < 1.2) {
           const flyOutX = lastHeroPos.x + crashAnimT * width * 0.55;
           const flyOutY = lastHeroPos.y - crashAnimT * height * 0.6;
-          drawJetpackHero(ctx, flyOutX, flyOutY, -0.55, 1.6, customCharImgRef.current);
+          drawJetpackHero(
+            ctx,
+            flyOutX,
+            flyOutY,
+            -0.32,
+            1.6,
+            customCharSpriteRef.current,
+            width < 520 ? 90 : 116
+          );
         }
       }
 

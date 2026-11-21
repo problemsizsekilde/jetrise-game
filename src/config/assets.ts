@@ -1,8 +1,6 @@
 /**
- * Xüsusi PNG qrafik elementlər üçün mərkəzləşdirilmiş konfiqurasiya.
- * `public/assets/` qovluğuna şəkil əlavə edib aşağıdakı sahələrə yol yazdıqda
- * (məsələn: '/assets/character.png'), UI avtomatik olaraq həmin PNG-ni istifadə edəcək.
- * `null` olduqda daxili yüksək keyfiyyətli vektor/canvas qrafikası göstərilir.
+ * Xüsusi qrafik elementlər üçün mərkəzləşdirilmiş konfiqurasiya.
+ * `public/logo.png` (header loqosu) və `public/flyer.png` (uçan personaj) aktivdir.
  */
 export interface VisualAssetsConfig {
   characterPng: string | null;
@@ -12,8 +10,8 @@ export interface VisualAssetsConfig {
 }
 
 export const VISUAL_ASSETS: VisualAssetsConfig = {
-  characterPng: null, // Məsələn: '/assets/character.png'
-  stageBgPng: null,   // Məsələn: '/assets/stage-bg.png'
-  cardFramePng: null, // Məsələn: '/assets/card-frame.png'
-  logoPng: null,      // Məsələn: '/assets/logo.png'
+  characterPng: '/flyer.png',
+  stageBgPng: null,
+  cardFramePng: null,
+  logoPng: '/logo.png',
 };
