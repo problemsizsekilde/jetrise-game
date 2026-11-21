@@ -15,14 +15,27 @@ import {
   updateUserProfile,
 } from './db.mjs';
 import {
+  getAdminBotStatus,
   handleTelegramUpdate,
   notifyAdminNewRequest,
   startTelegramBot,
 } from './telegramBot.mjs';
-import { handleSignalBotUpdate, startSignalBot } from './signalBot.mjs';
+import {
+  getSignalBotStatus,
+  handleSignalBotUpdate,
+  startSignalBot,
+} from './signalBot.mjs';
 import { getCurrentAndNextRound } from './globalTimeline.mjs';
 
 loadEnvFile();
+
+process.on('unhandledRejection', (reason) => {
+  console.error('[Process] Unhandled Rejection:', reason);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('[Process] Uncaught Exception:', err);
+});
 
 const PORT = Number(process.env.PORT || 3001);
 
@@ -136,28 +149,20 @@ const server = http.createServer(async (req, res) => {
       });
     }
 
-    // Health & shared clock sync
+    // Health & live bot diagnostics (no secrets exposed)
     if (req.method === 'GET' && (pathname === '/api/health' || pathname === '/health')) {
-      const hasAdminBotToken = Boolean(
-        process.env.TELEGRAM_ADMIN_BOT_TOKEN ||
-          process.env.TELEGRAM_BOT_TOKEN ||
-          process.env.ADMIN_BOT_TOKEN
-      );
-      const hasAdminId = Boolean(
-        process.env.TELEGRAM_ADMIN_ID ||
-          process.env.TELEGRAM_ADMIN_CHAT_ID ||
-          process.env.ADMIN_CHAT_ID ||
-          process.env.ADMIN_ID
-      );
-      const hasSignalBotToken = Boolean(process.env.TELEGRAM_SIGNAL_BOT_TOKEN);
+      const adminBot = getAdminBotStatus();
+      const signalBot = getSignalBotStatus();
 
       return reply(200, {
         ok: true,
         serverTimeMs: Date.now(),
-        hasAdminBotToken,
-        hasAdminId,
-        adminBotConfigured: hasAdminBotToken && hasAdminId,
-        signalBotConfigured: hasSignalBotToken,
+        hasAdminBotToken: adminBot.hasToken,
+        hasAdminId: adminBot.hasAdminId,
+        adminBotConfigured: adminBot.configured,
+        signalBotConfigured: signalBot.configured,
+        adminBot,
+        signalBot,
       });
     }
 

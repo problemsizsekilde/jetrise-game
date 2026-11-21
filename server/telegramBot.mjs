@@ -463,18 +463,62 @@ export async function handleTelegramUpdate(update) {
 }
 
 let pollingActive = false;
+const adminBotState = {
+  connected: false,
+  username: null,
+  lastError: null,
+  lastPollAt: null,
+};
+
+export function getAdminBotStatus() {
+  const { token, adminId, mode } = getAdminBotConfig();
+  return {
+    configured: Boolean(token && adminId),
+    hasToken: Boolean(token),
+    hasAdminId: Boolean(adminId),
+    mode,
+    pollingActive,
+    connected: adminBotState.connected,
+    username: adminBotState.username,
+    lastError: adminBotState.lastError,
+    lastPollAt: adminBotState.lastPollAt,
+  };
+}
 
 export async function startTelegramBot() {
   const { token, adminId, mode } = getAdminBotConfig();
   if (!token) {
-    console.warn('[AdminBot] TELEGRAM_ADMIN_BOT_TOKEN tapılmadı — Admin Bot deaktivdir.');
+    adminBotState.lastError = 'TELEGRAM_ADMIN_BOT_TOKEN təyin edilməyib';
+    console.error('[AdminBot] XƏTA: TELEGRAM_ADMIN_BOT_TOKEN (və ya TELEGRAM_BOT_TOKEN) tapılmadı — Admin Bot başlamadı.');
     return;
   }
+  if (!adminId) {
+    adminBotState.lastError = 'TELEGRAM_ADMIN_ID təyin edilməyib';
+    console.error('[AdminBot] XƏBƏRDARLIQ: TELEGRAM_ADMIN_ID tapılmadı — depozit bildirişləri göndərilə bilməyəcək.');
+  }
 
-  console.log(`[AdminBot] Aktivdir (Admin ID: ${adminId}, Rejim: ${mode})`);
+  // Verify token via getMe so Render logs immediately show bot username or exact error
+  try {
+    const me = await adminTgApi('getMe');
+    if (me.ok && me.result) {
+      adminBotState.connected = true;
+      adminBotState.username = `@${me.result.username}`;
+      adminBotState.lastError = null;
+      console.log(`[AdminBot] Bağlandı: @${me.result.username} (ID: ${me.result.id}) | Admin ID: ${adminId || 'YOXDUR'} | Rejim: ${mode}`);
+    } else {
+      adminBotState.connected = false;
+      adminBotState.lastError = `getMe xətası (${me.error_code || ''}): ${me.description || JSON.stringify(me)}`;
+      console.error(`[AdminBot] ${adminBotState.lastError}`);
+      return;
+    }
+  } catch (err) {
+    adminBotState.connected = false;
+    adminBotState.lastError = `getMe şəbəkə xətası: ${err.message}`;
+    console.error(`[AdminBot] ${adminBotState.lastError}`);
+  }
 
   if (mode === 'webhook') {
-    console.log('[AdminBot] Webhook rejimi: POST /api/telegram/webhook');
+    console.log('[AdminBot] Webhook rejimi aktivdir: POST /api/telegram/webhook');
     return;
   }
 
@@ -482,12 +526,16 @@ export async function startTelegramBot() {
   pollingActive = true;
 
   try {
-    await adminTgApi('deleteWebhook', { drop_pending_updates: false });
+    const delRes = await adminTgApi('deleteWebhook', { drop_pending_updates: false });
+    if (!delRes.ok) {
+      console.error('[AdminBot] deleteWebhook xətası:', delRes.description || JSON.stringify(delRes));
+    }
   } catch (err) {
-    console.warn('[AdminBot] deleteWebhook xəbərdarlığı:', err.message);
+    console.error('[AdminBot] deleteWebhook istisnası:', err.message);
   }
 
   let offset = 0;
+  let lastLoggedErr = '';
   const poll = async () => {
     while (pollingActive) {
       try {
@@ -496,16 +544,41 @@ export async function startTelegramBot() {
           timeout: 25,
           allowed_updates: ['message', 'callback_query'],
         });
+        adminBotState.lastPollAt = Date.now();
         if (res.ok && Array.isArray(res.result)) {
+          adminBotState.connected = true;
+          adminBotState.lastError = null;
+          lastLoggedErr = '';
           for (const upd of res.result) {
             offset = upd.update_id + 1;
-            await handleTelegramUpdate(upd);
+            try {
+              await handleTelegramUpdate(upd);
+            } catch (handlerErr) {
+              console.error('[AdminBot] Update emalı xətası:', handlerErr);
+            }
           }
         } else if (!res.ok) {
-          await new Promise((r) => setTimeout(r, 3000));
+          const code = res.error_code || '';
+          const desc = res.description || JSON.stringify(res);
+          const msg =
+            code === 409
+              ? `409 Conflict (başqa bir server/kompüter eyni Admin Bot tokeni ilə polling edir): ${desc}`
+              : `getUpdates xətası (${code}): ${desc}`;
+          adminBotState.lastError = msg;
+          if (msg !== lastLoggedErr) {
+            console.error(`[AdminBot] ${msg}`);
+            lastLoggedErr = msg;
+          }
+          await new Promise((r) => setTimeout(r, code === 409 ? 5000 : 3000));
         }
-      } catch {
-        await new Promise((r) => setTimeout(r, 3500));
+      } catch (err) {
+        const msg = `getUpdates şəbəkə xətası: ${err.message}`;
+        adminBotState.lastError = msg;
+        if (msg !== lastLoggedErr) {
+          console.error(`[AdminBot] ${msg}`);
+          lastLoggedErr = msg;
+        }
+        await new Promise((r) => setTimeout(r, 4000));
       }
     }
   };
