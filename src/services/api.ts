@@ -23,21 +23,17 @@ export interface AuthResponse {
   user?: UserProfile;
 }
 
-const DEFAULT_API_URL = 'https://jetrise-game.onrender.com';
-
 /**
- * Backend API base URL.
- * - Uses `VITE_API_URL` when provided, otherwise defaults to Render backend `https://jetrise-game.onrender.com`.
- * - Strips trailing slashes and any trailing `/api` so `/api/api/...` or relative Vercel URLs never occur.
+ * Forced Render Backend API base URL.
+ * Always routes every request directly to Render (`https://jetrise-game.onrender.com`),
+ * never to relative Vercel paths regardless of environment variables.
  */
-export const API_BASE_URL = String(import.meta.env.VITE_API_URL || DEFAULT_API_URL)
-  .trim()
-  .replace(/\/+$/, '')
-  .replace(/\/api$/i, '');
+export const API_BASE = 'https://jetrise-game.onrender.com';
+export const API_BASE_URL = API_BASE;
 
 function buildApiUrl(path: string): string {
   const cleanPath = `/${path.replace(/^\/+/, '')}`.replace(/\/{2,}/g, '/');
-  return `${API_BASE_URL}${cleanPath}`;
+  return `${API_BASE}${cleanPath}`;
 }
 
 function isLocalHost(): boolean {
