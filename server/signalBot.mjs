@@ -19,6 +19,15 @@ function sanitizeAdminContact(raw) {
   return cleaned;
 }
 
+function getPublicBaseUrl() {
+  const raw = (
+    process.env.PUBLIC_BASE_URL ||
+    process.env.RENDER_EXTERNAL_URL ||
+    (process.env.RENDER ? 'https://jetrise-game.onrender.com' : '')
+  ).trim();
+  return raw.replace(/\/+$/, '');
+}
+
 function getSignalBotConfig() {
   const token = (
     process.env.TELEGRAM_SIGNAL_BOT_TOKEN ||
@@ -32,6 +41,15 @@ function getSignalBotConfig() {
     ''
   ).trim();
 
+  const publicBaseUrl = getPublicBaseUrl();
+  const explicitMode = (process.env.TELEGRAM_MODE || '').toLowerCase();
+  const mode =
+    explicitMode === 'force-polling'
+      ? 'polling'
+      : publicBaseUrl || explicitMode === 'webhook'
+        ? 'webhook'
+        : 'polling';
+
   return {
     token,
     adminToken,
@@ -39,7 +57,9 @@ function getSignalBotConfig() {
     accessPriceAzn: Number(process.env.SIGNAL_ACCESS_PRICE_AZN || 55),
     testPriceAzn: Number(process.env.SIGNAL_TEST_PRICE_AZN || 2),
     cooldownSec: Number(process.env.SIGNAL_COOLDOWN_SECONDS || 12),
-    mode: (process.env.TELEGRAM_MODE || 'polling').toLowerCase(),
+    mode,
+    publicBaseUrl,
+    webhookSecret: (process.env.TELEGRAM_WEBHOOK_SECRET || '').trim(),
   };
 }
 
@@ -334,6 +354,7 @@ let signalPollingActive = false;
 const signalBotState = {
   connected: false,
   username: null,
+  webhookUrl: null,
   lastError: null,
   lastPollAt: null,
 };
@@ -345,6 +366,7 @@ export function getSignalBotStatus() {
     hasToken: Boolean(token),
     mode,
     pollingActive: signalPollingActive,
+    webhookUrl: signalBotState.webhookUrl,
     connected: signalBotState.connected,
     username: signalBotState.username,
     lastError: signalBotState.lastError,
@@ -353,7 +375,7 @@ export function getSignalBotStatus() {
 }
 
 export async function startSignalBot() {
-  const { token, adminToken, mode } = getSignalBotConfig();
+  const { token, adminToken, mode, publicBaseUrl, webhookSecret } = getSignalBotConfig();
   if (!token) {
     signalBotState.lastError = 'TELEGRAM_SIGNAL_BOT_TOKEN təyin edilməyib';
     console.error('[SignalBot] XƏTA: TELEGRAM_SIGNAL_BOT_TOKEN (və ya SIGNAL_BOT_TOKEN) tapılmadı — Siqnal Botu başlamadı.');
@@ -387,7 +409,28 @@ export async function startSignalBot() {
   }
 
   if (mode === 'webhook') {
-    console.log('[SignalBot] Webhook rejimi aktivdir: POST /api/telegram/signal-webhook');
+    const webhookUrl = `${publicBaseUrl || 'https://jetrise-game.onrender.com'}/api/telegram/signal-webhook`;
+    try {
+      const payload = {
+        url: webhookUrl,
+        allowed_updates: ['message', 'callback_query'],
+      };
+      if (webhookSecret) {
+        payload.secret_token = webhookSecret;
+      }
+      const whRes = await signalTgApi('setWebhook', payload);
+      if (whRes.ok) {
+        signalBotState.webhookUrl = webhookUrl;
+        signalBotState.lastError = null;
+        console.log(`[SignalBot] Webhook avtomatik quruldu: ${webhookUrl}`);
+      } else {
+        signalBotState.lastError = `setWebhook xətası: ${whRes.description || JSON.stringify(whRes)}`;
+        console.error(`[SignalBot] ${signalBotState.lastError}`);
+      }
+    } catch (err) {
+      signalBotState.lastError = `setWebhook şəbəkə xətası: ${err.message}`;
+      console.error(`[SignalBot] ${signalBotState.lastError}`);
+    }
     return;
   }
 

@@ -358,4 +358,20 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`[LuckyJet API] http://localhost:${PORT} ünvanında aktivdir`);
   startTelegramBot();
   startSignalBot();
+
+  // Keep Render warm with periodic self-ping when running on Render
+  const publicUrl = (
+    process.env.PUBLIC_BASE_URL ||
+    process.env.RENDER_EXTERNAL_URL ||
+    ''
+  )
+    .trim()
+    .replace(/\/+$/, '');
+  if (publicUrl) {
+    const pingUrl = `${publicUrl}/api/health`;
+    setInterval(() => {
+      fetch(pingUrl).catch(() => {});
+    }, 10 * 60 * 1000);
+    console.log(`[KeepAlive] 10 dəqiqəlik ping aktivdir: ${pingUrl}`);
+  }
 });

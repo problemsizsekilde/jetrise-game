@@ -10,6 +10,15 @@ import {
   revokeSignalAccess,
 } from './db.mjs';
 
+function getPublicBaseUrl() {
+  const raw = (
+    process.env.PUBLIC_BASE_URL ||
+    process.env.RENDER_EXTERNAL_URL ||
+    (process.env.RENDER ? 'https://jetrise-game.onrender.com' : '')
+  ).trim();
+  return raw.replace(/\/+$/, '');
+}
+
 function getAdminBotConfig() {
   const token = (
     process.env.TELEGRAM_ADMIN_BOT_TOKEN ||
@@ -26,10 +35,21 @@ function getAdminBotConfig() {
       ''
   ).trim();
 
+  const publicBaseUrl = getPublicBaseUrl();
+  const explicitMode = (process.env.TELEGRAM_MODE || '').toLowerCase();
+  const mode =
+    explicitMode === 'force-polling'
+      ? 'polling'
+      : publicBaseUrl || explicitMode === 'webhook'
+        ? 'webhook'
+        : 'polling';
+
   return {
     token,
     adminId,
-    mode: (process.env.TELEGRAM_MODE || 'polling').toLowerCase(),
+    mode,
+    publicBaseUrl,
+    webhookSecret: (process.env.TELEGRAM_WEBHOOK_SECRET || '').trim(),
   };
 }
 
@@ -477,6 +497,7 @@ let pollingActive = false;
 const adminBotState = {
   connected: false,
   username: null,
+  webhookUrl: null,
   lastError: null,
   lastPollAt: null,
 };
@@ -489,6 +510,7 @@ export function getAdminBotStatus() {
     hasAdminId: Boolean(adminId),
     mode,
     pollingActive,
+    webhookUrl: adminBotState.webhookUrl,
     connected: adminBotState.connected,
     username: adminBotState.username,
     lastError: adminBotState.lastError,
@@ -497,7 +519,7 @@ export function getAdminBotStatus() {
 }
 
 export async function startTelegramBot() {
-  const { token, adminId, mode } = getAdminBotConfig();
+  const { token, adminId, mode, publicBaseUrl, webhookSecret } = getAdminBotConfig();
   if (!token) {
     adminBotState.lastError = 'TELEGRAM_ADMIN_BOT_TOKEN təyin edilməyib';
     console.error('[AdminBot] XƏTA: TELEGRAM_ADMIN_BOT_TOKEN (və ya TELEGRAM_BOT_TOKEN) tapılmadı — Admin Bot başlamadı.');
@@ -529,7 +551,28 @@ export async function startTelegramBot() {
   }
 
   if (mode === 'webhook') {
-    console.log('[AdminBot] Webhook rejimi aktivdir: POST /api/telegram/webhook');
+    const webhookUrl = `${publicBaseUrl || 'https://jetrise-game.onrender.com'}/api/telegram/webhook`;
+    try {
+      const payload = {
+        url: webhookUrl,
+        allowed_updates: ['message', 'callback_query'],
+      };
+      if (webhookSecret) {
+        payload.secret_token = webhookSecret;
+      }
+      const whRes = await adminTgApi('setWebhook', payload);
+      if (whRes.ok) {
+        adminBotState.webhookUrl = webhookUrl;
+        adminBotState.lastError = null;
+        console.log(`[AdminBot] Webhook avtomatik quruldu: ${webhookUrl}`);
+      } else {
+        adminBotState.lastError = `setWebhook xətası: ${whRes.description || JSON.stringify(whRes)}`;
+        console.error(`[AdminBot] ${adminBotState.lastError}`);
+      }
+    } catch (err) {
+      adminBotState.lastError = `setWebhook şəbəkə xətası: ${err.message}`;
+      console.error(`[AdminBot] ${adminBotState.lastError}`);
+    }
     return;
   }
 
