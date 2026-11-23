@@ -14,7 +14,7 @@ export interface DepositMethodConfig {
 
 export const DEPOSIT_CARD_REQUISITE = {
   bankName: 'Kapital Bank',
-  cardNumber: '4169 7388 2980 8082',
+  cardNumber: '0000 0000 0000 0000',
 } as const;
 
 export const DEPOSIT_METHODS: Record<DepositMethodId, DepositMethodConfig> = {
